@@ -1,0 +1,24 @@
+From 083f6ddf2efc9a465a6d3a3185f08edd0cb3769e Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 15:03:36 +0800
+Subject: [PATCH] kernel: add the conntrack dependency to ipt-ipopt
+
+---
+ package/kernel/linux/modules/netfilter.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/package/kernel/linux/modules/netfilter.mk b/package/kernel/linux/modules/netfilter.mk
+index 1e047250b2..e2b4829671 100644
+--- a/package/kernel/linux/modules/netfilter.mk
++++ b/package/kernel/linux/modules/netfilter.mk
+@@ -328,6 +328,7 @@ $(eval $(call KernelPackage,ipt-offload))
+ define KernelPackage/ipt-ipopt
+   TITLE:=Modules for matching/changing IP packet options
+   KCONFIG:=$(KCONFIG_IPT_IPOPT)
++  DEPENDS:=+PACKAGE_kmod-nf-conntrack:kmod-nf-conntrack
+   FILES:=$(foreach mod,$(IPT_IPOPT-m),$(LINUX_DIR)/net/$(mod).ko)
+   AUTOLOAD:=$(call AutoProbe,$(notdir $(IPT_IPOPT-m)))
+   $(call AddDepends/ipt)
+-- 
+2.43.0
+
