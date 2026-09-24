@@ -1,0 +1,122 @@
+---
+profile: jdcloud_er2
+target: ipq53xx
+subtarget: generic
+description: Build image for the JDCloud ER2
+image: bin/targets/ipq53xx/generic/openwrt-ipq53xx-jdcloud_er2-squashfs-sysupgrade.bin
+feeds:
+  - name: qca
+    path: ../../feeds/qca-wifi-7
+    
+include:
+  - webui
+packages:
+  - ipq53xx
+  - qca-ssdk-shell
+  - kmod-qca-nss-drv
+  - kmod-qca-nss-ppe
+  - kmod-qca-nss-dp-qca
+  - kmod-qca-ssdk-qca-nohnat
+  - kmod-qca-nss-ppe-bridge-mgr
+  - kmod-qca-nss-ppe-vlan-mgr
+  - kmod-qca-mdio
+  - kmod-qca-nss-phy
+  - kmod-qca-nss-ppe-ds
+  - kmod-qca-nss-ppe-rule
+  - kmod-qca-nss-ppe-vp
+  # SFE is the fast-path engine, ECM is the connection manager that actually
+  # programs the flows into it (SFE alone never creates a single connection:
+  # "sfe_dump" stays at create_requests=0 / num_connections=0 and everything is
+  # software forwarded).  kmod-qca-nss-ecm-standard depends on
+  # kmod-qca-nss-sfe + kmod-qca-nss-ppe and pulls in the /etc/init.d/qca-nss-ecm
+  # glue (loads ecm with the sfe/ppe front end and un-stops the front ends).
+  - kmod-qca-nss-sfe
+  - kmod-qca-nss-ecm-standard
+  - kmod-phylink
+  - kmod-fs-fsfs
+  - kmod-fs-squashfs
+  - kmod-tcp-bbr
+  - kmod-tun
+  - kmod-wireguard
+  - kmod-zram
+  - kmod-nvme
+  - kmod-tcp-bbr
+  - kmod-gpio-button-hotplug
+  - kmod-leds-gpio
+  - luci-compat
+  - luci-app-cloudflared
+  - luci-app-firewall
+  - luci-app-nss-overview
+  - wget-ssl
+  - curl
+  - dnslookup
+  - cfdisk
+  - blkid
+  - fdisk
+  - lsblk
+  - sgdisk
+  - parted
+  - zram-swap
+  - e2fsprogs
+  - kmod-fs-ext4
+  - uboot-envtools
+  - f2fs-tools
+  - losetup
+  - tcpdump
+  - ethtool
+  - terminfo
+  - tc-tiny
+  - resolveip
+  - openssl-util
+  - mii_mgr
+  - blockd
+  - htop
+  - luci-i18n-upnp-zh-cn
+  - luci-theme-argon
+  - luci-theme-bootstrap-mod
+  - luci-app-upnp
+  - kmod-tun
+  - kmod-zram
+  - kmod-nf-flow
+  - kmod-nls-base
+  - kmod-nls-cp437
+  - mod-nls-iso8859-1
+  - kmod-nls-utf8
+  - kmod-sched-core
+  - kmod-fs-autofs4
+  - kmod-fs-vfat
+  - kmod-ifb
+  - kmod-inet-diag
+  - kmod-crypto-acompress
+  - kmod-crypto-ccm
+  - kmod-crypto-cmac
+  - kmod-phylink
+  - kmod-crypto-crc32c
+  - kmod-crypto-ctr
+  - kmod-crypto-des
+  - kmod-crypto-gcm
+  - kmod-crypto-gf128
+  - kmod-crypto-ghash
+  - kmod-crypto-hmac
+  - kmod-crypto-md4
+  - kmod-crypto-md5
+  - kmod-crypto-rng
+  - kmod-crypto-seqiv
+  - kmod-crypto-sha256
+  - kmod-crypto-sha512
+
+#include:
+#  - ucentral-ap
+diffconfig: |
+  CONFIG_KERNEL_IPQ_MEM_PROFILE=0
+  CONFIG_ARCH_QCOM=y
+  # PPE Qdisc (hardware rate-limit) disabled on purpose: with it enabled the
+  # ECM PPE front end rejects hardware acceleration for any flow whose
+  # interface carries a Linux qdisc (see v4_exception_ported_from_iface_
+  # qdisc_unsupported), which is the case for the NSS-DP ports as they come up
+  # with the default fq_codel.  Without it PPE acceleration works out of the box.
+  # CONFIG_PACKAGE_kmod-qca-nss-ppe-qdisc is not set
+
+
+
+

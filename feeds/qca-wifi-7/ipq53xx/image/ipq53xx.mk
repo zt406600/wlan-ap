@@ -242,3 +242,31 @@ define Device/indio_um-325be
   DEVICE_PACKAGES := ath12k-wifi-indio-um-325be ath12k-firmware-qcn92xx ath12k-firmware-ipq5332
 endef
 TARGET_DEVICES += indio_um-325be
+
+define Device/jdcloud_er2
+  DEVICE_VENDOR := JDCloud
+  SUPPORTED_DEVICES += jdcloud,er2
+  DEVICE_MODEL := ER2 (RE-CS-08)
+  DEVICE_DTS_DIR := ../dts
+  DEVICE_DTS := ipq5332-jdcloud-er2
+  SOC := ipq5332
+  KERNEL_SIZE := 8192k
+  IMAGE_SIZE := 262144k
+  BLOCKSIZE := 256k
+  DEVICE_COMPAT_MODEL := jdcloud,er2
+  DEVICE_DTS_CONFIG := config@mi01.6
+  IMAGES := factory.bin sysupgrade.bin
+  IMAGE/factory.bin := append-kernel | pad-to $$(KERNEL_SIZE) | append-rootfs | pad-rootfs | check-size
+  # NOTE: sysupgrade-tar must NOT be fed with the kernel+rootfs concatenation.
+  # `rootfs=$$@` is only valid when the pipeline starts from the rootfs (then $@ is the
+  # rootfs), otherwise the whole raw image ends up as the `root` member of the tar and the
+  # kernel cannot mount it ("VFS: Unable to mount root fs"). Use the plain tar which takes
+  # IMAGE_KERNEL/IMAGE_ROOTFS from the image prerequisites (same as the other devices).
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+  DEVICE_PACKAGES := uboot-env uboot-envtools -wpad-basic-mbedtls -iwinfo -wpad-openssl \
+		     -kmod-ath12k-qca -ath12k-firmware-qcn92xx -kmod-qca-nss-wifi-plugins \
+		     -kmod-bootconfig -kmod-usb-phy-ipq807x -kmod-ata-core -kmod-ata-ahci -kmod-ata-ahci-platform \
+		     -kmod-usb3 -kmod-usb-dwc3-qcom-internal -kmod-button-hotplug
+
+endef
+TARGET_DEVICES += jdcloud_er2

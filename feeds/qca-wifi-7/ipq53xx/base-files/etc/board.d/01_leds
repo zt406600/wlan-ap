@@ -31,6 +31,17 @@ sonicfi,rap750e-s|\
 sonicfi,rap750w-311a)
 	ucidef_set_led_default "power" "POWER" "pwm:blue" "on"
 	;;
+jdcloud,be6500)
+	ucidef_set_led_netdev "WAN" "WAN" "led_green" "eth0"
+	;;
+jdcloud,er2|jdcloud,re-cs-08)
+	ucidef_set_led_default "power" "POWER" "led_green" "1"
+	# led-boot = &led_blue never gets switched off at boot ("connect" state only
+	# touches the running LED), so the blue LED keeps the 100ms timer set during
+	# preinit.  Force it off once /etc/init.d/led runs (START=96 > done=95).
+	ucidef_set_led_default "boot" "BOOT" "led_blue" "0"
+	ucidef_set_led_netdev "SFP" "SFP" "led_sfp" "eth0" "link tx rx"
+	;;
 esac
 
 board_config_flush
