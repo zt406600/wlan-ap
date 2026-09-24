@@ -10,17 +10,24 @@ feeds:
     
 include:
   - webui
+# Base system and kernel packages only.  User space extras (applications,
+# themes, translations, ...) are deliberately kept out of this file: they are
+# added through the local .config of the build, so the profile only has to
+# describe what the board itself needs to bring its firmware up.
 packages:
+  # --- board / platform ------------------------------------------------
   - ipq53xx
   - qca-ssdk-shell
-  - kmod-qca-nss-drv
-  - kmod-qca-nss-ppe
+  # --- NSS / PPE / SSDK driver stack (kernel) --------------------------
   - kmod-qca-nss-dp-qca
+  - kmod-qca-nss-phy
+  - kmod-qca-mdio
   - kmod-qca-ssdk-qca-nohnat
+  - kmod-qca-nss-ppe
   - kmod-qca-nss-ppe-bridge-mgr
   - kmod-qca-nss-ppe-vlan-mgr
-  - kmod-qca-mdio
-  - kmod-qca-nss-phy
+  - kmod-qca-nss-ppe-netlink
+  - kmod-qca-nss-ppe-pppoe-mgr
   - kmod-qca-nss-ppe-ds
   - kmod-qca-nss-ppe-rule
   - kmod-qca-nss-ppe-vp
@@ -33,67 +40,54 @@ packages:
   - kmod-qca-nss-sfe
   - kmod-qca-nss-ecm-standard
   - kmod-phylink
-  - kmod-fs-fsfs
-  - kmod-fs-squashfs
-  - kmod-tcp-bbr
-  - kmod-tun
-  - kmod-wireguard
-  - kmod-zram
-  - kmod-nvme
-  - kmod-tcp-bbr
-  - kmod-gpio-button-hotplug
-  - kmod-leds-gpio
-  - luci-compat
-  - luci-app-cloudflared
-  - luci-app-firewall
-  - luci-app-nss-overview
-  - wget-ssl
-  - curl
-  - dnslookup
-  - cfdisk
+  - kmod-phy-aquantia
+  # --- storage / filesystem / boot (base system) ------------------------
+  - block-mount
+  - blockd
+  - autocore-arm
+  - uboot-envtools
+  - e2fsprogs
+  - resize2fs
   - blkid
-  - fdisk
   - lsblk
+  - cfdisk
+  - fdisk
   - sgdisk
   - parted
-  - zram-swap
-  - e2fsprogs
-  - kmod-fs-ext4
-  - uboot-envtools
-  - f2fs-tools
   - losetup
-  - tcpdump
-  - ethtool
-  - terminfo
+  - kmod-loop
+  - kmod-nvme
+  - kmod-fs-ext4
+  - kmod-fs-squashfs
+  - kmod-fs-autofs4
+  # --- base networking --------------------------------------------------
   - tc-tiny
   - resolveip
-  - openssl-util
-  - mii_mgr
-  - blockd
-  - htop
-  - luci-i18n-upnp-zh-cn
-  - luci-theme-argon
-  - luci-theme-bootstrap-mod
-  - luci-app-upnp
-  - kmod-tun
-  - kmod-zram
+  # --- kernel: netfilter / tunnels / GPIO / NLS -------------------------
   - kmod-nf-flow
-  - kmod-nls-base
-  - kmod-nls-cp437
-  - mod-nls-iso8859-1
-  - kmod-nls-utf8
-  - kmod-sched-core
-  - kmod-fs-autofs4
-  - kmod-fs-vfat
   - kmod-ifb
   - kmod-inet-diag
+  - kmod-tun
+  - kmod-wireguard
+  - kmod-tcp-bbr
+  - kmod-sched-core
+  - kmod-gpio-button-hotplug
+  - kmod-leds-gpio
+  # --- kernel: pstore/ramoops (panic log) -------------------------------
+  # The board DTS reserves ramoops@49c00000 (see ipq5332-jdcloud-er2.dts), so
+  # the pstore backend and the ramoops driver belong into the base image.
+  - kmod-pstore
+  - kmod-ramoops
+  - kmod-nls-base
+  - kmod-nls-cp437
+  - kmod-nls-iso8859-1
+  - kmod-nls-utf8
+  # --- kernel: crypto (wireguard / IPsec / dm-crypt) --------------------
   - kmod-crypto-acompress
   - kmod-crypto-ccm
   - kmod-crypto-cmac
-  - kmod-phylink
   - kmod-crypto-crc32c
   - kmod-crypto-ctr
-  - kmod-crypto-des
   - kmod-crypto-gcm
   - kmod-crypto-gf128
   - kmod-crypto-ghash
@@ -110,6 +104,9 @@ packages:
 diffconfig: |
   CONFIG_KERNEL_IPQ_MEM_PROFILE=0
   CONFIG_ARCH_QCOM=y
+  # SAWF/telemetry steering is not used on this board; the qca feed enables it
+  # by default (CONFIG_PACKAGE_ATH12K_SAWF defaults to y).
+  # CONFIG_PACKAGE_ATH12K_SAWF is not set
   # PPE Qdisc (hardware rate-limit) disabled on purpose: with it enabled the
   # ECM PPE front end rejects hardware acceleration for any flow whose
   # interface carries a Linux qdisc (see v4_exception_ported_from_iface_
