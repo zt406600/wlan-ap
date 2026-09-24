@@ -1,0 +1,21 @@
+From 5fc75540b9c3c75aafeb8002b8dcf007fb076bf7 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 15:03:36 +0800
+Subject: [PATCH] feeds: add the smpackage feed
+
+---
+ feeds.conf.default | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/feeds.conf.default b/feeds.conf.default
+index e05aa65153..d11504fc00 100644
+--- a/feeds.conf.default
++++ b/feeds.conf.default
+@@ -3,3 +3,4 @@ src-git luci https://git.openwrt.org/project/luci.git^650a6ca36d786059aa7f85fbe0
+ src-git routing https://git.openwrt.org/feed/routing.git^b2097c85bef85251364f59a6b2a3ed1f9f5c0c21
+ src-git telephony https://git.openwrt.org/feed/telephony.git^2618106d5846a4a542fdf5809f0d3ed228ce439b
+ src-git video https://github.com/openwrt/video.git^094bf58da6682f895255a35a84349a79dab4bf95
++src-git smpackage https://github.com/kenzok8/small-package
+-- 
+2.43.0
+
