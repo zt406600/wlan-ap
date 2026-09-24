@@ -1,0 +1,48 @@
+From 5f015fe22c2782526b59fa845c04c4be24d07d14 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Fri, 19 Sep 2026 14:30:00 +0800
+Subject: [PATCH] kernel: crypto: enable ARMv8 Crypto Extensions for ipq53xx
+
+The IPQ5332 (ipq53xx target) reports the full ARMv8 Crypto Extensions
+feature set (aes, pmull, sha1, sha2, crc32), but the KernelPackage
+mapping tables only wire up the aarch64-ce sub-variants for
+mediatek/filogic, mvebu/cortexa5x, qualcommax and rockchip/armv8.
+
+Consequently sha1-ce.ko and sha2-ce.ko are built - both
+CONFIG_CRYPTO_SHA1_ARM64_CE and CONFIG_CRYPTO_SHA2_ARM64_CE are set to
+=m - but they are never packaged into the firmware, because neither
+KernelPackage/crypto-sha1/aarch64-ce nor
+KernelPackage/crypto-sha256/aarch64-ce is selected for this BOARD.
+SHA1 therefore falls back to sha1-generic at runtime.
+
+Add the missing ipq53xx mappings so the hardware implementations get
+shipped and can be picked up by the CryptoAPI.
+
+Signed-off-by: leerep <leerep@163.com>
+---
+ package/kernel/linux/modules/crypto.mk | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/package/kernel/linux/modules/crypto.mk b/package/kernel/linux/modules/crypto.mk
+index 292c4f01d9..e5373a617e 100644
+--- a/package/kernel/linux/modules/crypto.mk
++++ b/package/kernel/linux/modules/crypto.mk
+@@ -993,6 +993,7 @@ endef
+ KernelPackage/crypto-sha1/imx/cortexa7=$(KernelPackage/crypto-sha1/arm-neon)
+ KernelPackage/crypto-sha1/imx/cortexa9=$(KernelPackage/crypto-sha1/arm-neon)
+ KernelPackage/crypto-sha1/ipq40xx=$(KernelPackage/crypto-sha1/arm-neon)
++KernelPackage/crypto-sha1/ipq53xx=$(KernelPackage/crypto-sha1/aarch64-ce)
+ KernelPackage/crypto-sha1/mediatek/filogic=$(KernelPackage/crypto-sha1/aarch64-ce)
+ KernelPackage/crypto-sha1/mediatek/mt7622=$(KernelPackage/crypto-sha1/aarch64-ce)
+ KernelPackage/crypto-sha1/mvebu/cortexa9=$(KernelPackage/crypto-sha1/arm-neon)
+@@ -1085,6 +1086,7 @@ define KernelPackage/crypto-sha256/x86_64
+ endef
+ endif
+ 
++KernelPackage/crypto-sha256/ipq53xx=$(KernelPackage/crypto-sha256/aarch64-ce)
+ KernelPackage/crypto-sha256/mediatek/filogic=$(KernelPackage/crypto-sha256/aarch64-ce)
+ KernelPackage/crypto-sha256/mediatek/mt7622=$(KernelPackage/crypto-sha256/aarch64-ce)
+ KernelPackage/crypto-sha256/mvebu/cortexa53=$(KernelPackage/crypto-sha256/aarch64-ce)
+-- 
+2.34.1
+
