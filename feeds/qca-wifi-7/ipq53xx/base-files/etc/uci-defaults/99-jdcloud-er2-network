@@ -1,0 +1,65 @@
+#!/bin/sh
+# JDCloud ER2 (RE-CS-08): create the default LAN/WAN configuration.
+#
+# patches-25.12/0021-base-files-do-not-generate-default-interfaces-on-fir.patch
+# comments out the generate_network() loop in /bin/config_generate, so the
+# network section that this target's /etc/board.d/02_network writes ends up in
+# /etc/board.json only and is never turned into /etc/config/network. Recreate
+# the defaults generate_network() would have emitted for this board:
+#
+#	lan	br-lan (eth0 + switch VLAN 2 CPU port eth1.2), 192.168.1.1/24
+#	wan	eth1.1 (switch VLAN 1, port 1), DHCP client
+#
+# Only fill in what is not configured yet, so that the settings of an existing
+# installation survive a keep-config sysupgrade.
+
+case "$(cat /tmp/sysinfo/board_name 2>/dev/null)" in
+	jdcloud,er2|jdcloud,re-cs-08) ;;
+	*) exit 0 ;;
+esac
+
+# config_generate created /etc/config/network right before this script runs.
+# uci refuses to create a section in a config file that does not exist.
+[ -f /etc/config/network ] || touch /etc/config/network
+
+changed=0
+
+if [ -z "$(uci -q get network.lan)" ]; then
+	uci -q delete network.brlan
+	uci -q set network.brlan='device'
+	uci -q set network.brlan.name='br-lan'
+	uci -q set network.brlan.type='bridge'
+	uci -q add_list network.brlan.ports='eth0'
+	uci -q add_list network.brlan.ports='eth1.2'
+
+	uci -q set network.lan='interface'
+	uci -q set network.lan.device='br-lan'
+	uci -q set network.lan.proto='static'
+	uci -q add_list network.lan.ipaddr='192.168.1.1/24'
+	uci -q set network.lan.ip6assign='60'
+
+	changed=1
+fi
+
+if [ -z "$(uci -q get network.wan)" ]; then
+	uci -q set network.wan='interface'
+	uci -q set network.wan.device='eth1.1'
+	uci -q set network.wan.proto='dhcp'
+
+	if [ -e /proc/sys/net/ipv6 ]; then
+		uci -q delete network.wan6
+		uci -q set network.wan6='interface'
+		uci -q set network.wan6.device='eth1.1'
+		uci -q set network.wan6.proto='dhcpv6'
+	fi
+
+	changed=1
+fi
+
+[ "$changed" = "0" ] && exit 0
+
+# Exit non-zero when the commit did not go through: uci_apply_defaults() only
+# removes this script after a success, so the config is then retried next boot.
+uci commit network || exit 1
+
+exit 0

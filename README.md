@@ -178,9 +178,15 @@ cd openwrt && cp .config ../defconfig/jdc-er2.config
 `…-initramfs-kernel.bin`（救援/救砖用），以及 `config.buildinfo`、`feeds.buildinfo`、
 `…manifest`、`sha256sums`（`feeds.buildinfo` 记录了本次编译实际用到的 feed revision）。
 
-刷完后网线接 **LAN 口**（`02_network` 里是 `ucidef_set_interfaces_lan_wan "eth0" "eth1.1"`：
-`eth0` 为 LAN，下面交换口 2/3/4 是 LAN、1 是 WAN），浏览器打开 `http://192.168.1.1`，
+刷完后网线接 **LAN 口**（`eth0` 与下面交换口 2/3/4 是 LAN、1 是 WAN，见
+`feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network`），浏览器打开 `http://192.168.1.1`，
 用户名 `root`，默认密码 **`123456`**（`patches-25.12/0014-*`，刷完请第一时间改掉）。
+
+默认网络配置由 `feeds/qca-wifi-7/ipq53xx/base-files/etc/uci-defaults/99-jdcloud-er2-network`
+在首次启动时写入：`lan` 是桥 `br-lan`（`eth0` + 交换 VLAN 2 的 CPU 口 `eth1.2`）静态
+`192.168.1.1/24`，`wan` 是 `eth1.1` 走 DHCP（`wan6` 是 `eth1.1` 上的 DHCPv6）。
+它不是在 `02_network` 里“顺带”生成的：`patches-25.12/0021-*` 注释掉了 `/bin/config_generate`
+里 `generate_network()` 的调用循环，`02_network` 只写 `/etc/board.json`，接口得在这里补。
 
 ### 注意事项
 
