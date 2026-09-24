@@ -1,0 +1,26 @@
+From 3015b951ba4cf8bbdb00f66f35dd890a1866feb8 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 15:03:36 +0800
+Subject: [PATCH] base-files: drop the EST client check from fwtool
+
+---
+ package/base-files/files/lib/upgrade/fwtool.sh | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/package/base-files/files/lib/upgrade/fwtool.sh b/package/base-files/files/lib/upgrade/fwtool.sh
+index 8c7ab2cf0b..bf5265dfa7 100644
+--- a/package/base-files/files/lib/upgrade/fwtool.sh
++++ b/package/base-files/files/lib/upgrade/fwtool.sh
+@@ -53,9 +53,6 @@ fwtool_check_image() {
+ 	json_get_var compatmessage compat_message
+ 	[ -n "$imagecompat" ] || imagecompat="1.0"
+ 
+-	if ! est_client fwtool; then
+-		return 1
+-	fi
+ 
+ 	# select correct supported list based on compat_version
+ 	# (using this ensures that compatibility check works for devices
+-- 
+2.43.0
+
