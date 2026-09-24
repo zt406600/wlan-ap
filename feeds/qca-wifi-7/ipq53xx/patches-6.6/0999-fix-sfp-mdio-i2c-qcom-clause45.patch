@@ -1,0 +1,13 @@
+--- a/drivers/net/phy/sfp.c
++++ b/drivers/net/phy/sfp.c
+@@ -1905,6 +1905,10 @@ static int sfp_sm_probe_for_phy(struct sfp *sfp)
+ 		err = sfp_sm_probe_phy(sfp, SFP_PHY_ADDR, true);
+ 		break;
+ 
++	case MDIO_I2C_QCOM:
++		err = sfp_sm_probe_phy(sfp, SFP_PHY_ADDR, true);
++		break;
++
+ 	case MDIO_I2C_ROLLBALL:
+ 		err = sfp_sm_probe_phy(sfp, SFP_PHY_ADDR_ROLLBALL, true);
+ 		break;
