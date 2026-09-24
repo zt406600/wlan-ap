@@ -1,0 +1,548 @@
+From 55dd79b2c081e0140f1dad56eab0e49b6ccb3920 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 14:15:54 +0800
+Subject: [PATCH] luci-app-nss-overview: add thermal and NSS acceleration rows
+ to the status overview
+
+Add a self-contained LuCI add-on package which shows the SoC temperature and the QCA NSS/PPE hardware acceleration counters inside the system table of the "Status -> Overview" page.
+
+The two rows are added through LuCI's documented extension point: luci-mod-status scans /www/luci-static/resources/view/status/include/ for *.js files, loads them sorted by name and calls load()/render() on each of them from view/status/index.js. 11_nss.js therefore sorts right after 10_system.js (the system table) and patches that table from render().
+
+The data is collected by the bundled Lua controller from the ECM/PPE debugfs counters and the thermal zones and is fetched from load(), i.e. before index.js renders anything, so the table and the two extra rows are written to the DOM in one synchronous pass. Doing the same work from a timer or a MutationObserver after render() instead makes the rows disappear and reappear on every 5 second poll of the overview page, which shows up as a jumping page.
+
+The counters are reported per address family: ECM keeps separate front ends for IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table has separate v4_*/v6_* entries, so the controller reads both families and the front end shows the split next to the totals. The CPU temperature is read from the thermal zone the controller recognises as the CPU sensor (a zone whose type contains "cpu", falling back to tsens_tz_sensor14 on ipq5332, whose zones are renamed by ipq5332-thermald.dtsi) instead of the maximum over all sensors, and is labelled as such.
+
+---
+ package/luci-app-nss-overview/Makefile             |  13 ++
+ .../resources/view/status/include/11_nss.js        | 259 +++++++++++++++++++++
+ .../luasrc/controller/nss_status.lua               | 135 +++++++++++
+ .../luasrc/view/nss_status/status.htm              |  95 ++++++++
+ 4 files changed, 502 insertions(+)
+diff --git a/package/luci-app-nss-overview/Makefile b/package/luci-app-nss-overview/Makefile
+new file mode 100644
+index 0000000000..986ff3b51b
+--- /dev/null
++++ b/package/luci-app-nss-overview/Makefile
+@@ -0,0 +1,13 @@
++include $(TOPDIR)/rules.mk
++
++PKG_NAME:=luci-app-nss-overview
++PKG_VERSION:=1.0
++PKG_RELEASE:=4
++
++LUCI_TITLE:=NSS/PPE acceleration and thermal status in LuCI overview
++LUCI_DEPENDS:=+luci-mod-status +luci-compat
++LUCI_PKGARCH:=all
++
++include $(TOPDIR)/feeds/luci/luci.mk
++
++# call BuildPackage - OpenWrt buildroot signature
+diff --git a/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
+new file mode 100644
+index 0000000000..0b9637713b
+--- /dev/null
++++ b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
+@@ -0,0 +1,259 @@
++'use strict';
++'require baseclass';
++
++/*
++ * luci-app-nss-overview
++ *
++ * 在“状态 -> 概览”的系统信息表里插入两行：
++ *   - 温度       （插在「架构」之后）
++ *   - 硬件加速   （插在「平均负载」之后）
++ *
++ * 本文件位于 luci-mod-status 动态扫描的 include 目录中（index.js 的 load()
++ * 会 fs.list 该目录、按文件名排序后 L.require），不改动上游任何文件。
++ *
++ * 页面不跳动的前提（改这个文件前务必先读完）：
++ *
++ *   1) index.js 的 load() 把本 include 的 load() 一起放进 Promise.all，
++ *      等所有 include 的数据都就绪后，才在 **同一个同步循环** 里按文件名
++ *      顺序调用各 include 的 render()（见 index.js 的 poll_status()）。
++ *      所以：数据必须在 load() 里取（fetchData），不能在 render() 之后
++ *      再异步去取 —— 否则首屏会出现“表格先出来、补行稍后才长出来”。
++ *
++ *   2) 10_system.js（系统表格）在循环里排在 11_nss.js 之前，本文件在其后
++ *      同步补写行，因此表格与补行属于同一次 DOM 更新，浏览器只画一帧。
++ *      如果改用定时器 / MutationObserver / requestAnimationFrame 异步补写，
++ *      LuCI 每次轮询重建表格时都会先清掉这两行、下一帧才补回，页面就会
++ *      周期性上下跳动。
++ *
++ *   3) 本 include 必须在后续轮询里也持续被调用：被 localStorage 标记成
++ *      hide 的 include 在后续轮询中既不会调 load() 也不会调 render()
++ *      （index.js:39 与 :66），所以这里始终清掉残留的 hide 标记。
++ *
++ * render() 返回 null：index.js 只在 content != null 时才把栏目 display
++ * 打开（index.js:82），返回 null 后本栏目永远隐藏，屏幕上不会多出一个
++ * 空的 "NSS Overview"（也不需要任何 CSS hack）。
++ */
++
++/* _() 依赖 i18n 就绪，标签集延迟初始化并缓存 */
++var LABELS = null;
++
++function labelSet(list) {
++	var out = [];
++
++	for (var i = 0; i < list.length; i++) {
++		try { out.push(_(list[i])); } catch (e) {}
++		out.push(list[i]);
++	}
++
++	return out;
++}
++
++function labels() {
++	if (!LABELS)
++		LABELS = {
++			arch: labelSet([ 'Architecture', '架构' ]),
++			load: labelSet([ 'Load Average', '平均负载' ])
++		};
++
++	return LABELS;
++}
++
++function matches(text, set) {
++	if (!text)
++		return false;
++
++	for (var i = 0; i < set.length; i++)
++		if (set[i] && text === set[i])
++			return true;
++
++	return false;
++}
++/*
++ * 单次遍历定位系统表格及其相关行（含我们自己插入的两行）。
++ * 使用 table.rows / tr.cells 原生属性，比反复 querySelectorAll 便宜。
++ */
++function locate() {
++	var l = labels(),
++	    tables = document.querySelectorAll('table.table');
++
++	for (var i = 0; i < tables.length; i++) {
++		var rows = tables[i].rows,
++		    found = { table: tables[i], arch: null, load: null, temp: null, accel: null };
++
++		for (var j = 0; j < rows.length; j++) {
++			var tr = rows[j],
++			    mark = tr.getAttribute('data-nss');
++
++			if (mark === 'temp') { found.temp = tr; continue; }
++			if (mark === 'accel') { found.accel = tr; continue; }
++
++			var cell = tr.cells[0],
++			    text = cell ? (cell.textContent || '').trim() : '';
++
++			if (!found.arch && matches(text, l.arch))
++				found.arch = tr;
++			else if (!found.load && matches(text, l.load))
++				found.load = tr;
++		}
++
++		if (found.arch || found.load)
++			return found;
++	}
++
++	return null;
++}
++
++/* 只作兜底判断用：两行都在就什么都不做 */
++function needsRefill() {
++	var f = locate();
++
++	return !f || !f.temp || !f.accel;
++}
++
++function makeRow(mark, label, value) {
++	return E('tr', { 'class': 'tr', 'data-nss': mark }, [
++		E('td', { 'class': 'td left', 'width': '33%' }, [ label ]),
++		E('td', { 'class': 'td left' }, [ value ])
++	]);
++}
++
++function maxTemp(temps) {
++	var m = 0;
++
++	for (var i = 0; i < temps.length; i++)
++		if (temps[i] > m)
++			m = temps[i];
++
++	return m;
++}
++
++
++/*
++ * 有分族明细时补上「 (IPv4：a，IPv6：b)」。PPE 与 SFE 在 ECM 里都是按协议族
++ * 分开统计的（ecm_ppe_ipv4/ipv6、ecm_sfe_ipv4/ipv6），加速连接总数即两族之和；
++ * controller 还是旧版（响应里没有分族字段）时不显示括号，退化为只显示总数。
++ */
++function familySuffix(d, key) {
++	var v4 = d[key + '_v4'],
++	    v6 = d[key + '_v6'];
++
++	if (v4 == null && v6 == null)
++		return '';
++
++	return ' (IPv4：' + (v4 || 0) + '，IPv6：' + (v6 || 0) + ')';
++}
++
++function apply(d) {
++	try {
++		d = d || {};
++		window._nssOverviewLastData = d;
++
++		var f = locate();
++
++		if (!f) {
++			if (window.console)
++				console.debug('nss-overview: system table not found (yet)');
++			return;
++		}
++
++		/* 温度：优先用 controller 认出来的 CPU 传感器（thermal_zoneN/type 里
++		 * 含 cpu 的那个），没有就退化成所有传感器的最大值；值前面显式加
++		 * "CPU：" 前缀，免得把它当成整机或无线温度。 */
++		var temps = Array.isArray(d.temps) ? d.temps : [],
++		    tbase = (d.cpu_temp != null) ? d.cpu_temp : maxTemp(temps),
++		    tval = temps.length ? ('CPU：' + tbase + ' °C') : '-';
++
++		if (f.arch) {
++			if (f.temp)
++				f.temp.cells[1].textContent = tval;
++			else
++				f.arch.parentNode.insertBefore(makeRow('temp', '温度', tval), f.arch.nextSibling);
++		}
++
++		if (f.load) {
++			/* PPE/SFE 的加速连接数 = IPv4 + IPv6（见 familySuffix 的说明）；
++			 * ECM连接总数取自 ecm_db，含两族、也含尚未加速的连接，口径不同。 */
++			var aval = 'PPE: ' + (d.ppe_accel || 0) + familySuffix(d, 'ppe_accel') +
++			           ', SFE: ' + (d.sfe_accel || 0) + familySuffix(d, 'sfe_accel') +
++			           ', ECM连接总数: ' + (d.conns || 0);
++
++			if (f.accel)
++				f.accel.cells[1].textContent = aval;
++			else
++				f.load.parentNode.insertBefore(makeRow('accel', '硬件加速', aval), f.load.nextSibling);
++		}
++	}
++	catch (e) {
++		if (window.console)
++			console.error('nss-overview: apply failed: ' + e);
++	}
++}
++
++/* 由当前页面路径推导 LuCI base，不依赖 L.env.cgi_base 的实现细节 */
++function dataURL() {
++	var m = window.location.pathname.match(/^(.*?)\/admin\//);
++
++	return (m ? m[1] : '/cgi-bin/luci') + '/admin/status/nss_status/data';
++}
++
++/*
++ * 取数放在 load()：LuCI 会等这个 promise，之后才渲染系统表格，
++ * 所以首屏就是“表格 + 两行”一次画完。失败时给空对象，
++ * 表格仍会补出两行、值显示 '-'（与旧实现的行为一致）。
++ */
++function fetchData() {
++	return fetch(dataURL(), { credentials: 'same-origin', cache: 'no-store' })
++		.then(function(r) { return r.json(); })
++		.catch(function() { return {}; });
++}
++
++/*
++ * 兜底：正常情况下 render() 已经同步补好两行，这里什么都不做
++ * （needsRefill() 为 false）。若将来有别的代码把行删掉，下一次 DOM
++ * 变化时在同一帧补回来，避免又出现周期性跳动。
++ */
++function installRefillObserver() {
++	if (window._nssOverviewObserver)
++		return;
++
++	var pending = false;
++
++	window._nssOverviewObserver = new MutationObserver(function() {
++		if (pending)
++			return;
++
++		pending = true;
++
++		requestAnimationFrame(function() {
++			pending = false;
++
++			if (window._nssOverviewLastData && needsRefill())
++				apply(window._nssOverviewLastData);
++		});
++	});
++
++	window._nssOverviewObserver.observe(
++		document.getElementById('view') || document.body,
++		{ childList: true, subtree: true });
++}
++
++return baseclass.extend({
++	/* 仅用于内部标识（LuCI 会把它当作 include 的 id），栏目本身会被隐藏 */
++	title: 'NSS Overview',
++
++	load: function() {
++		/* 清掉残留的 hide 标记，保证后续轮询仍会调用 render() */
++		try { localStorage.removeItem('NSS Overview'); } catch (e) {}
++
++		return fetchData();
++	},
++
++	render: function(data) {
++		apply(data);
++
++		installRefillObserver();
++
++		return null;
++	}
++});
++
+diff --git a/package/luci-app-nss-overview/luasrc/controller/nss_status.lua b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
+new file mode 100644
+index 0000000000..d7a42187b4
+--- /dev/null
++++ b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
+@@ -0,0 +1,135 @@
++-- NSS / PPE 加速状态页面（读取 QCA ECM 与 PPE 的 debugfs 统计）
++module("luci.controller.nss_status", package.seeall)
++
++-- Lua 5.2+ 里 unpack 变成了 table.unpack，两种运行时都兼容
++local unpack = unpack or table.unpack
++
++local function read_file(path)
++	local f = io.open(path, "r")
++	if not f then return nil end
++	local v = f:read("*all")
++	f:close()
++	return v
++end
++
++local function read_num(path)
++	local v = read_file(path)
++	if not v then return nil end
++	local n = v:match("%d+")
++	return n and tonumber(n) or nil
++end
++
++-- 读取一个 thermal zone 的“类型名 + 摄氏度”。类型名来自
++-- /sys/class/thermal/thermal_zoneN/type（IPQ 平台一般是 cpu0-thermal 之类），
++-- 有了它才能把「CPU 温度」和 NSS/无线等其它传感器区分开。
++local function read_zone(i)
++	local t = read_num("/sys/class/thermal/thermal_zone" .. i .. "/temp")
++
++	if not t then return nil end
++
++	local k = read_file("/sys/class/thermal/thermal_zone" .. i .. "/type")
++
++	return (k and (k:gsub("%s+$", "")) or ("zone" .. i)), math.floor(t / 1000)
++end
++
++-- QCA 的 ipq5332-thermald.dtsi 会删掉内核原本带 CPU 名字的热区
++-- （cpu-top-thermal 等）再按裸传感器号重建，于是 sysfs 里只剩
++-- tsens_tz_sensorNN，名字里根本没有 "cpu"。该平台传感器编号是固定的：
++-- 11=rfa-0、12=rfa-1、13=misc、14=cpu-top、15=top-glue，所以名字匹配不到时
++-- 按 compatible 退回取 cpu-top 那颗；再不行才用全部传感器的最大值。
++local function read_compat()
++	local c = read_file("/sys/firmware/devicetree/base/compatible")
++
++	return c and (c:gsub("%z", " ")) or ""
++end
++
++local CPU_ZONE_FALLBACK = {
++	ipq5332 = "tsens_tz_sensor14",
++}
++
++local function collect_stats()
++	local d = {}
++	local ecm = "/sys/kernel/debug/ecm/"
++
++	-- 加速连接数：ECM 里 IPv4 与 IPv6 是各自独立的 front end
++	-- （frontends/ppe/ecm_ppe_ipv{4,6}.c、frontends/sfe/ecm_sfe_ipv{4,6}.c），
++	-- 每个 front end 都有自己的 accelerated_count（当前处于加速态的连接数）。
++	-- 只读 ipv4 会把 IPv6 的加速连接整段漏掉，所以两族分别读、再求和。
++	d.ppe_accel_v4 = read_num(ecm .. "ecm_ppe_ipv4/accelerated_count") or 0
++	d.ppe_accel_v6 = read_num(ecm .. "ecm_ppe_ipv6/accelerated_count") or 0
++	d.ppe_accel    = d.ppe_accel_v4 + d.ppe_accel_v6
++
++	d.sfe_accel_v4 = read_num(ecm .. "ecm_sfe_ipv4/accelerated_count") or 0
++	d.sfe_accel_v6 = read_num(ecm .. "ecm_sfe_ipv6/accelerated_count") or 0
++	d.sfe_accel    = d.sfe_accel_v4 + d.sfe_accel_v6
++
++	-- ECM 连接库总数：两族之和，并且包含尚未加速的连接，口径与上面两个不同
++	d.conns = read_num(ecm .. "ecm_db/connection_count") or 0
++
++	-- PPE 流表：同样分 v4/v6（drv/ppe_drv/ppe_drv_stats.c 的 common_stats）
++	local s = read_file("/sys/kernel/debug/qca-nss-ppe/stats/common_stats")
++
++	local function flow(name)
++		return s and tonumber(s:match("%[" .. name .. "%]:%s*(%d+)")) or 0
++	end
++
++	d.ppe_flows_v4, d.ppe_flows_v6 = flow("v4_l3_flows"), flow("v6_l3_flows")
++	d.ppe_l2_v4,    d.ppe_l2_v6    = flow("v4_l2_flows"), flow("v6_l2_flows")
++	d.host_fail_v4, d.host_fail_v6 = flow("v4_host_add_fail"), flow("v6_host_add_fail")
++	d.create_fail_v4, d.create_fail_v6 = flow("v4_create_fail"), flow("v6_create_fail")
++
++	d.ppe_flows   = d.ppe_flows_v4 + d.ppe_flows_v6
++	d.ppe_l2      = d.ppe_l2_v4 + d.ppe_l2_v6
++	d.host_fail   = d.host_fail_v4 + d.host_fail_v6
++	d.create_fail = d.create_fail_v4 + d.create_fail_v6
++
++	-- 温度：temps 保留纯数值数组（兼容旧前端），zones 带类型名，
++	-- cpu_temp 取名字里带 cpu 的传感器中的最大值（没有则退化为全传感器最大值）
++	d.temps, d.zones = {}, {}
++
++	for i = 0, 9 do
++		local k, t = read_zone(i)
++
++		if t then
++			d.temps[#d.temps + 1] = t
++			d.zones[#d.zones + 1] = { name = k, temp = t }
++
++			if k:lower():find("cpu", 1, true) and (d.cpu_temp == nil or t > d.cpu_temp) then
++				d.cpu_temp, d.cpu_name = t, k
++			end
++		end
++	end
++
++	if d.cpu_temp == nil then
++		local compat = read_compat()
++
++		for k, v in pairs(CPU_ZONE_FALLBACK) do
++			if compat:find(k, 1, true) then
++				for i = 1, #d.zones do
++					if d.zones[i].name == v then
++						d.cpu_temp, d.cpu_name = d.zones[i].temp, d.zones[i].name
++					end
++				end
++
++				break
++			end
++		end
++	end
++
++	if d.cpu_temp == nil and #d.temps > 0 then
++		d.cpu_temp = math.max(unpack(d.temps))
++		d.cpu_name = "max"
++	end
++
++	return d
++end
++
++function action_data()
++	luci.http.prepare_content("application/json")
++	luci.http.write_json(collect_stats())
++end
++
++function index()
++	entry({"admin", "status", "nss_status"}, template("nss_status/status"), _("加速状态"), 90).leaf = true
++	entry({"admin", "status", "nss_status", "data"}, call("action_data")).leaf = true
++end
+diff --git a/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm b/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm
+new file mode 100644
+index 0000000000..0c2fb441ee
+--- /dev/null
++++ b/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm
+@@ -0,0 +1,95 @@
++<%
++local url_data = luci.dispatcher.build_url("admin", "status", "nss_status", "data")
++-%>
++
++<h2 name="content"><%:NSS / PPE 加速状态%></h2>
++
++<style>
++.nss-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
++.nss-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px; text-align: center; }
++.nss-card .v { font-size: 26px; font-weight: 600; color: #2c6fbb; line-height: 1.3; }
++.nss-card .k { font-size: 12px; color: #666; margin-top: 4px; }
++.nss-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
++.nss-item { border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 12px; font-size: 13px; }
++.nss-item b { color: #2c6fbb; }
++.temp-hot { color: #d9534f; font-weight: 600; }
++.temp-ok { color: #27ae60; font-weight: 600; }
++@media (prefers-color-scheme: dark) {
++	.nss-card, .nss-item { background: #2c3e50; border-color: #445566; color: #ddd; }
++	.nss-card .v { color: #6cb2eb; }
++	.nss-item b { color: #6cb2eb; }
++}
++</style>
++
++<div class="nss-grid">
++	<div class="nss-card"><div class="v" id="ppe_accel">-</div><div class="k">PPE 加速连接</div><div class="k" id="ppe_accel_fam">IPv4 - / IPv6 -</div></div>
++	<div class="nss-card"><div class="v" id="sfe_accel">-</div><div class="k">SFE 加速连接</div><div class="k" id="sfe_accel_fam">IPv4 - / IPv6 -</div></div>
++	<div class="nss-card"><div class="v" id="conns">-</div><div class="k">ECM 连接总数（v4+v6）</div></div>
++</div>
++
++<div class="nss-row">
++	<div class="nss-item">PPE L3 流（当前）v4/v6：<b id="ppe_flows">-</b></div>
++	<div class="nss-item">PPE L2 流（当前）v4/v6：<b id="ppe_l2">-</b></div>
++	<div class="nss-item">host 添加失败（累计）v4/v6：<b id="host_fail">-</b></div>
++	<div class="nss-item">流创建失败（累计）v4/v6：<b id="create_fail">-</b></div>
++</div>
++
++<h3><%:温度%></h3>
++<div class="nss-row" id="temps"></div>
++
++<p style="font-size:12px;color:#888;">
++	<%:数据来源%>：/sys/kernel/debug/ecm、/sys/kernel/debug/qca-nss-ppe、/sys/class/thermal — <span id="ts">-</span>
++</p>
++
++<script type="text/javascript">
++//<![CDATA[
++var nssURL = '<%=url_data%>';
++function nssSet(id, v) {
++	var e = document.getElementById(id);
++	if (e) e.textContent = v;
++}
++function nssRefresh() {
++	fetch(nssURL, { credentials: 'same-origin', cache: 'no-store' })
++		.then(function (r) { return r.json(); })
++		.then(function (d) {
++			nssSet('ppe_accel', d.ppe_accel);
++			nssSet('sfe_accel', d.sfe_accel);
++			nssSet('conns', d.conns);
++			/* PPE / SFE 在 ECM 里按协议族分开统计，这里把 v4/v6 明细也显示出来 */
++			nssSet('ppe_accel_fam', 'IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0));
++			nssSet('sfe_accel_fam', 'IPv4 ' + (d.sfe_accel_v4 || 0) + ' / IPv6 ' + (d.sfe_accel_v6 || 0));
++			nssSet('ppe_flows', (d.ppe_flows_v4 || 0) + ' / ' + (d.ppe_flows_v6 || 0));
++			nssSet('ppe_l2', (d.ppe_l2_v4 || 0) + ' / ' + (d.ppe_l2_v6 || 0));
++			nssSet('host_fail', (d.host_fail_v4 || 0) + ' / ' + (d.host_fail_v6 || 0));
++			nssSet('create_fail', (d.create_fail_v4 || 0) + ' / ' + (d.create_fail_v6 || 0));
++
++			/* 优先用带类型名的 zones（thermal_zoneN/type），没有就退回纯数值数组 */
++			var box = document.getElementById('temps');
++			var zones = d.zones || [];
++			if (box && (zones.length || (d.temps && d.temps.length))) {
++				var html = '';
++				if (zones.length) {
++					for (var i = 0; i < zones.length; i++) {
++						var z = zones[i];
++						var cls = z.temp >= 80 ? 'temp-hot' : 'temp-ok';
++						html += '<div class="nss-item">' + (z.name || ('sensor' + i)) + '：<span class="' + cls + '">' + z.temp + ' °C</span></div>';
++					}
++				}
++				else {
++					for (var j = 0; j < d.temps.length; j++) {
++						var tj = d.temps[j];
++						var clsj = tj >= 80 ? 'temp-hot' : 'temp-ok';
++						html += '<div class="nss-item">sensor' + j + '：<span class="' + clsj + '">' + tj + ' °C</span></div>';
++					}
++				}
++				box.innerHTML = html;
++			}
++			var ts = document.getElementById('ts');
++			if (ts) ts.textContent = new Date().toLocaleTimeString();
++		})
++		.catch(function () {});
++}
++nssRefresh();
++setInterval(nssRefresh, 3000);
++//]]>
++</script>
+-- 
+2.34.1
