@@ -1,0 +1,26 @@
+cpufreq: demote "Running at unlisted initial frequency" message to debug
+
+On ipq53xx U-Boot hands the CPU over parked on GPLL0 (the Stromer Plus APSS
+PLL cannot be reconfigured while it drives the CPU, so it is parked on GPLL0
+and switched back afterwards).  clk_get_rate() therefore reports 799999999 Hz
+=> 799999 kHz, which is not present in the speed-bin filtered OPP table, so
+cpufreq_online() prints:
+
+  cpufreq: cpufreq_online: CPU0: Running at unlisted initial frequency:
+  799999 KHz, changing to: 1100000 KHz
+
+The frequency is still corrected as intended (to the lowest listed OPP), only
+the log line is noise.  Print it at debug level so the boot log stays clean;
+no functional change.  It can still be seen with dynamic debug enabled.
+
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -1532,7 +1532,7 @@
+ 			 * frequency for longer duration. Hence, a BUG_ON().
+ 			 */
+ 			BUG_ON(ret);
+-			pr_info("%s: CPU%d: Running at unlisted initial frequency: %u KHz, changing to: %u KHz\n",
++			pr_debug("%s: CPU%d: Running at unlisted initial frequency: %u KHz, changing to: %u KHz\n",
+ 				__func__, policy->cpu, old_freq, policy->cur);
+ 		}
+ 	}
