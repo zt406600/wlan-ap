@@ -1,0 +1,52 @@
+PCI: dwc: do not warn about inbound iATU size when there are no dma-ranges
+
+"PCI: dwc: devsoc: fix inbound ATU configuration" made dw_pcie_iatu_detect()
+skip the inbound iATU probe when the host bridge node carries no dma-ranges
+property, because in that case the PCIe-to-CPU mapping is 1:1 and neither the
+detection nor the configuration of the inbound windows is needed.  As a result
+num_ib_windows stays 0 on such platforms (e.g. ipq5332, whose DTS never uses
+dma-ranges).
+
+dw_pcie_iatu_setup() however checks the outcome of the (now possibly empty)
+dma-ranges loop with a single statement:
+
+	i = 0;
+	resource_list_for_each_entry(entry, &pp->bridge->dma_ranges) {
+		...
+	}
+
+	if (pci->num_ib_windows <= i)
+		dev_warn(pci->dev, "Dma-ranges exceed inbound iATU size (%u)\n",
+			 pci->num_ib_windows);
+
+With an empty dma_ranges list the loop body never runs, so i is still 0 and
+"0 <= 0" is true.  Every ipq5332 board therefore reports
+
+  qcom-pcie 18000000.pcie: Dma-ranges exceed inbound iATU size (0)
+
+at boot although it has no dma-ranges at all and the inbound window is
+intentionally unused.  Apply the same condition that the detection uses and
+only warn when there really are dma-ranges that did not fit into the available
+inbound windows.
+
+No functional change apart from the bogus log line.
+
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -723,8 +723,15 @@ static int dw_pcie_iatu_setup(struct dw_pcie_rp *pp)
+ 			return ret;
+ 		}
+ 	}
+ 
+-	if (pci->num_ib_windows <= i)
++	/*
++	 * Do not complain when the node has no dma-ranges at all: the
++	 * PCIe-to-CPU mapping is 1:1 then and dw_pcie_iatu_detect() skipped
++	 * the inbound probe on purpose ("PCI: dwc: devsoc: fix inbound ATU
++	 * configuration"), so num_ib_windows is 0 and "0 <= 0" would warn
++	 * although there is nothing to configure.
++	 */
++	if (!list_empty(&pp->bridge->dma_ranges) && pci->num_ib_windows <= i)
+ 		dev_warn(pci->dev, "Dma-ranges exceed inbound iATU size (%u)\n",
+ 			 pci->num_ib_windows);
+ 
