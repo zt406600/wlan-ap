@@ -188,6 +188,15 @@ cd openwrt && cp .config ../defconfig/jdc-er2.config
 它不是在 `02_network` 里“顺带”生成的：`patches-25.12/0021-*` 注释掉了 `/bin/config_generate`
 里 `generate_network()` 的调用循环，`02_network` 只写 `/etc/board.json`，接口得在这里补。
 
+同一个脚本还会把 `02_network` 从 `factory` 分区读出的 MAC 写成 `config device` 段：
+`eth0`/`eth1.2` 用 LAN MAC，`eth1`/`eth1.1` 用 WAN MAC（netifd 只会自动套用键名完全匹配的
+`eth0`/`eth1`，而 board.json 里 VLAN 存的是 `eth1_1`/`eth1_2`，所以 `eth1.1`/`eth1.2` 必须显式写段）。
+已经存在的 device 段一律不动，用户改过的 MAC 不会被覆盖。
+
+这个脚本只跑一次：`uci_apply_defaults()` 只会在脚本 `exit 0` 后把它从 `/etc/uci-defaults`
+删掉（见 rootfs `/etc/init.d/boot`），“保留配置”刷机时它虽然会再出现，但所有写入都带
+“不存在才创建”的守卫，实测重跑后 `/etc/config/network` 的 md5 不变。
+
 ### 注意事项
 
 `make defconfig`/`feeds update` 会把所有 feed 的软件包元数据扫一遍（几分钟）。其中

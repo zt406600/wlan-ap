@@ -9,6 +9,7 @@
 #
 #	lan	br-lan (eth0 + switch VLAN 2 CPU port eth1.2), 192.168.1.1/24
 #	wan	eth1.1 (switch VLAN 1, port 1), DHCP client
+#	device	the factory MAC addresses of network_device (board.json)
 #
 # Only fill in what is not configured yet, so that the settings of an existing
 # installation survive a keep-config sysupgrade.
@@ -23,6 +24,29 @@ esac
 [ -f /etc/config/network ] || touch /etc/config/network
 
 changed=0
+
+# This board gets its MAC addresses from the factory partition; board.d/02_network
+# puts them into /etc/board.json as network_device. netifd applies them itself for
+# devices whose name matches the key exactly (eth0, eth1), but the switch CPU port
+# VLANs are stored as eth1_1/eth1_2, so eth1.1/eth1.2 would keep the address the
+# driver picked - unless a "config device" section says otherwise, which is what
+# the replaced generate_network() loop used to emit. Never touch a device that is
+# configured already.
+add_device_mac() {
+	local key="$1" macaddr="$2" device
+
+	[ -n "$key" ] && [ -n "$macaddr" ] || return 0
+
+	# board.json stores eth1.1 as eth1_1; netifd knows the device as eth1.1
+	device="$(echo "$key" | sed 's/_\([0-9][0-9]*\)$/.\1/')"
+	[ -z "$(uci -q get "network.$key")" ] || return 0
+
+	uci -q set "network.$key=device"
+	uci -q set "network.$key.name=$device"
+	uci -q set "network.$key.macaddr=$macaddr"
+
+	changed=1
+}
 
 if [ -z "$(uci -q get network.lan)" ]; then
 	uci -q delete network.brlan
@@ -54,6 +78,27 @@ if [ -z "$(uci -q get network.wan)" ]; then
 	fi
 
 	changed=1
+fi
+
+# board.json (written by /etc/board.d/02_network) holds the factory MACs of this
+# unit, including the switch CPU port VLANs as eth1_1/eth1_2. generate_network()
+# used to turn them into "config device" sections; do the same here.
+if [ -f /etc/board.json ] && [ -f /usr/share/libubox/jshn.sh ]; then
+	. /usr/share/libubox/jshn.sh
+
+	json_load "$(cat /etc/board.json)"
+	if json_is_a network_device object; then
+		json_select network_device
+		json_get_keys devices
+		for device in $devices; do
+			json_select "$device"
+			json_get_var macaddr macaddr
+			json_select ..
+
+			add_device_mac "$device" "$macaddr"
+		done
+		json_select ..
+	fi
 fi
 
 [ "$changed" = "0" ] && exit 0
