@@ -1,0 +1,23 @@
+# ---
+# l2tp-mgr: add the network headers the client relies on implicitly
+#
+# nss_ppe_l2tp.c uses struct iphdr/IPVERSION (net/ip.h), inet_sk()
+# (net/inet_sock.h), udp_sk() (net/udp.h) and ARPHRD_PPP (linux/if_arp.h) but
+# only includes linux/l2tp.h + the kernel private l2tp_core.h, which do not
+# provide them.  Include the headers explicitly so the module builds with
+# -Wall -Werror.
+# ---
+--- a/clients/l2tp/nss_ppe_l2tp.c
++++ b/clients/l2tp/nss_ppe_l2tp.c
+@@ -15,7 +15,11 @@
+  */
+ #include <linux/module.h>
+ #include <linux/l2tp.h>
++#include <linux/if_arp.h>
+ #include <l2tp_core.h>
++#include <net/ip.h>
++#include <net/inet_sock.h>
++#include <net/udp.h>
+ #include <ppe_drv.h>
+ #include <nss_ppe_tun_drv.h>
+ #include "nss_ppe_l2tp.h"

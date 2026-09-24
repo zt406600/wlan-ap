@@ -1,0 +1,20 @@
+# ---
+# pppoe-mgr: keep the debug-print locals from tripping -Werror
+#
+# clients/pppoe/Makefile compiles the client with PPPOE_MGR_DEBUG_LEVEL=0, in
+# which pppoe_mgr_info() expands to nothing.  ppe_pppoe_mgr_remove_session()
+# only uses its local "info" through that macro, so the variable is reported as
+# unused and -Werror=unused-variable kills the build.  Mark the variable
+# __maybe_unused so it stays usable when the debug level is raised again.
+# ---
+--- a/clients/pppoe/frontends/ppe/ppe_pppoe_mgr.c
++++ b/clients/pppoe/frontends/ppe/ppe_pppoe_mgr.c
+@@ -60,7 +60,7 @@
+ {
+ 	struct pppoe_stats_ctx *ctx = &ctx_gbl;
+ 	struct pppoe_mgr_session_entry *entry = &ppe_entry->pppoe_pvt;
+-	struct pppoe_mgr_session_info *info = &entry->info;
++	struct pppoe_mgr_session_info *info __maybe_unused = &entry->info;
+ 
+ 	pppoe_mgr_info("%px: Remove PPPoE session with session_id=%u server_mac=%pM local_mac %pM\n",
+ 				   entry, info->session_id, info->server_mac, info->local_mac);

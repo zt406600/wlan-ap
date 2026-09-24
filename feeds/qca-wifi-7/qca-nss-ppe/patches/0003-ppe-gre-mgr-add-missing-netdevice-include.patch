@@ -1,0 +1,19 @@
+# ---
+# gre-mgr: add the missing netdevice.h include to the stats front-end
+#
+# ppe_gre_mgr_stats.c includes "ppe_gre_mgr.h" -> "gre_mgr.h", which declares
+# function-pointer typedefs taking "struct net_device *" at a point where the
+# struct has not been declared yet; the other gre sources pull netdevice.h in
+# indirectly.  Warnings are errors (-Wall -Werror), so include the header
+# explicitly like the rest of the client code does.
+# ---
+--- a/clients/gre/frontends/ppe/ppe_gre_mgr_stats.c
++++ b/clients/gre/frontends/ppe/ppe_gre_mgr_stats.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <linux/debugfs.h>
++#include <linux/netdevice.h>
+ #include "ppe_gre_mgr.h"
+ #include "ppe_gre_mgr_stats.h"
+ 
