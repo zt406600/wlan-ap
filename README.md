@@ -53,7 +53,7 @@ The build results are located in the `openwrt/bin/` directory:
 
 ## JDCloud ER2 固件构建
 
-京东云 ER2（DTS compatible `jdcloud,er2`，SoC ipq5332，target `ipq53xx/generic`）的板级支持、
+京东云 ER2（DTS compatible `jdcloud,er2`，SoC ipq5332，target `ipq53xx/generic`）的支持、
 QCA NSS/PPE/ECM 硬件加速补丁和默认配置都在本分支里。有两种构建方式，**二选一即可**：
 
 | 方式 | 命令 | 结果 |
@@ -98,7 +98,10 @@ GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/feeds install -a
 cp ../defconfig/jdc-er2.config .config
 GIT_CONFIG_GLOBAL=/tmp/git-mirror make defconfig
 
-# 6. 编译（-j 后接并行任务数）
+# 6. 下载构建包
+make -j$(nproc) download V=s
+
+# 7. 编译（-j 后接并行任务数）
 make -j$(nproc) V=s
 ```
 
@@ -134,13 +137,6 @@ make defconfig
 make -j$(nproc) V=s
 ```
 
-不开 menuconfig（脚本化/无人值守）也可以，直接改 `.config` 再归一化，效果一样：
-
-```bash
-echo 'CONFIG_PACKAGE_luci-app-ddns=y' >> .config    # 关掉则写 '# CONFIG_PACKAGE_xxx is not set'
-make defconfig
-make -j$(nproc) V=s
-```
 
 如果包不在任何 feed 里（例如本仓库不含源码的 `luci-app-mini-diskmanager`、`luci-theme-aurora`），
 把源码 clone 到 `openwrt/package/` 后，菜单里就会出现对应条目：
@@ -178,24 +174,6 @@ cd openwrt && cp .config ../defconfig/jdc-er2.config
 `…-initramfs-kernel.bin`（救援/救砖用），以及 `config.buildinfo`、`feeds.buildinfo`、
 `…manifest`、`sha256sums`（`feeds.buildinfo` 记录了本次编译实际用到的 feed revision）。
 
-刷完后网线接 **LAN 口**（`eth0` 与下面交换口 2/3/4 是 LAN、1 是 WAN，见
-`feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network`），浏览器打开 `http://192.168.1.1`，
-用户名 `root`，默认密码 **`123456`**（`patches-25.12/0014-*`，刷完请第一时间改掉）。
-
-默认网络配置由 `feeds/qca-wifi-7/ipq53xx/base-files/etc/uci-defaults/99-jdcloud-er2-network`
-在首次启动时写入：`lan` 是桥 `br-lan`（`eth0` + 交换 VLAN 2 的 CPU 口 `eth1.2`）静态
-`192.168.1.1/24`，`wan` 是 `eth1.1` 走 DHCP（`wan6` 是 `eth1.1` 上的 DHCPv6）。
-它不是在 `02_network` 里“顺带”生成的：`patches-25.12/0021-*` 注释掉了 `/bin/config_generate`
-里 `generate_network()` 的调用循环，`02_network` 只写 `/etc/board.json`，接口得在这里补。
-
-同一个脚本还会把 `02_network` 从 `factory` 分区读出的 MAC 写成 `config device` 段：
-`eth0`/`eth1.2` 用 LAN MAC，`eth1`/`eth1.1` 用 WAN MAC（netifd 只会自动套用键名完全匹配的
-`eth0`/`eth1`，而 board.json 里 VLAN 存的是 `eth1_1`/`eth1_2`，所以 `eth1.1`/`eth1.2` 必须显式写段）。
-已经存在的 device 段一律不动，用户改过的 MAC 不会被覆盖。
-
-这个脚本只跑一次：`uci_apply_defaults()` 只会在脚本 `exit 0` 后把它从 `/etc/uci-defaults`
-删掉（见 rootfs `/etc/init.d/boot`），“保留配置”刷机时它虽然会再出现，但所有写入都带
-“不存在才创建”的守卫，实测重跑后 `/etc/config/network` 的 md5 不变。
 
 ### 注意事项
 
