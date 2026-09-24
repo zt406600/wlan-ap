@@ -104,9 +104,16 @@ static __init int tmel_hw_key_init(void)
 	/*
 	 * Context to generate salt key is required only for XTS mode but the
 	 * context to generate key for data is mandatory.
+	 *
+	 * Both come from the kernel command line (hw_key.ctx_d=<hex> and,
+	 * for XTS, hw_key.ctx_s=<hex>), so an empty ctx_d simply means the
+	 * board does not use a HW key - e.g. no encrypted rootfs.  Report
+	 * that at debug level only: it is a configuration statement, not an
+	 * error, and printing it at boot makes every non-encrypted board
+	 * look broken.
 	 */
 	if (ctx_d_len == 0) {
-		pr_err("Context is not provided, skipping key init");
+		pr_debug("Context is not provided, skipping key init");
 		return ret;
 	}
 

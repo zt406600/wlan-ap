@@ -597,7 +597,16 @@ static int qti_tzlog_probe(struct platform_device *pdev)
 	if ((paniconaccessviolation && data) || (paniconaccessviolation == 1)) {
 		printk("TZ Log : Will panic on Access Violation, as paniconaccessviolation is set\n");
 	} else {
-		printk("TZ Log : Will warn on Access Violation, as paniconaccessviolation is not set\n");
+		/*
+		 * Not setting paniconaccessviolation is the normal, default
+		 * configuration (it is a module parameter, readable/writable
+		 * via /sys/module/tz_log/parameters/paniconaccessviolation),
+		 * so this statement is true on every board and only adds boot
+		 * noise.  Report it at debug level; the panic case above keeps
+		 * its printk because it only appears when somebody asked for
+		 * that behaviour explicitly.
+		 */
+		pr_debug("TZ Log : Will warn on Access Violation, as paniconaccessviolation is not set\n");
 	}
 
 	return 0;
