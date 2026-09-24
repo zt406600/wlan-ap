@@ -1,0 +1,101 @@
+From: leerep
+Date: Fri, 25 Sep 2026 04:00:00 +0800
+Subject: [PATCH] luci-app-firewall: add the SONiC fullcone NAT options
+
+Add the fullcone NAT controls to the firewall web interface, so that the
+kernel side (0984/0985/0986 of the qca-wifi-7 feed plus the nftables/libnftnl
+fullcone expression) can be configured from LuCI instead of raw uci:
+
+  - global "Fullcone NAT" gate in the defaults section,
+  - per-zone "Fullcone NAT" switch (only for masquerading zones),
+  - per-zone "Fullcone protocols" list in the advanced tab.
+
+The patch is applied to the luci feed checkout (a separate git repository that
+is not part of the openwrt tree) by `./setup.py --feed-patches`, see
+README.md.  It is a fixed-up version of the corrupt patch shipped by
+openwrt-sonic-fullcone (its last hunk header counts one line too many, which
+makes `git apply` fail with "corrupt patch") plus the Chinese translation
+appended to po/zh_Hans/firewall.po.
+
+ ---
+diff --git a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
+index 129d290e..c21300c1 100644
+--- a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
++++ b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
+@@ -56,6 +56,12 @@ return view.extend({
+ 
+ 		o = s.option(form.Flag, 'drop_invalid', _('Drop invalid packets'));
+ 
++		o = s.option(form.Flag, 'fullcone', _('Fullcone NAT'),
++			_('Global gate for SONiC-style fullcone NAT. When enabled, each zone can individually activate fullcone in its settings.'));
++		o.default = '0';
++		o.rmempty = true;
++		o.optional = true;
++
+ 		let p = [
+ 			s.option(form.ListValue, 'input', _('Input')),
+ 			s.option(form.ListValue, 'output', _('Output')),
+@@ -176,6 +182,12 @@ return view.extend({
+ 			return null;
+ 		};
+ 
++		o = s.taboption('general', form.Flag, 'fullcone', _('Fullcone NAT'),
++			_('Enable fullcone NAT for this zone. Requires the global Fullcone NAT gate to be enabled in General Settings. ' +
++			  'Use "Fullcone protocols" in Advanced Settings to restrict scope.'));
++		o.editable = true;
++		o.depends('masq', '1');
++
+ 		o = s.taboption('general', form.Flag, 'mtu_fix', _('MSS clamping'));
+ 		o.modalonly = true;
+ 
+@@ -278,6 +290,23 @@ return view.extend({
+ 		o.placeholder = '0.0.0.0/0';
+ 		o.modalonly = true;
+ 
++		o = s.taboption('advanced', form.MultiValue, 'fullcone_proto',
++			_('Fullcone protocols'),
++			_('Restrict fullcone NAT to specific L4 protocols. ' +
++			  'When empty, all protocols use fullcone. ' +
++			  'Recommended: select only UDP for gaming/P2P use cases.'));
++		o.value('tcp', _('TCP'));
++		o.value('udp', _('UDP'));
++		o.value('udplite', _('UDP-Lite'));
++		o.value('sctp', _('SCTP'));
++		o.value('dccp', _('DCCP'));
++		o.depends('fullcone', '1');
++		o.modalonly = true;
++		o.optional = true;
++		o.placeholder = _('All protocols');
++		o.display_size = 5;
++		o.delimiter = ' ';
++
+ 		o = s.taboption('conntrack', form.Flag, 'masq_allow_invalid', _('Allow "invalid" traffic'), _('Do not install extra rules to reject forwarded traffic with conntrack state <em>invalid</em>. This may be required for complex asymmetric route setups.'));
+ 		o.modalonly = true;
+ 
+diff --git a/applications/luci-app-firewall/po/zh_Hans/firewall.po b/applications/luci-app-firewall/po/zh_Hans/firewall.po
+index 0cbc248c..b1fc417f 100644
+--- a/applications/luci-app-firewall/po/zh_Hans/firewall.po
++++ b/applications/luci-app-firewall/po/zh_Hans/firewall.po
+@@ -1542,3 +1542,22 @@ msgstr "最多 65536 个条目。"
+ #: applications/luci-app-firewall/htdocs/luci-static/resources/tools/firewall.js:338
+ msgid "valid firewall mark"
+ msgstr "有效的防火墙标记"
++
++# SONiC-style fullcone NAT (openwrt-sonic-fullcone)
++msgid "Fullcone NAT"
++msgstr "全锥形 NAT"
++
++msgid "Global gate for SONiC-style fullcone NAT. When enabled, each zone can individually activate fullcone in its settings."
++msgstr "SONiC 全锥形 NAT 全局总开关。开启后，每个区域可在各自设置中单独启用全锥形 NAT。"
++
++msgid "Enable fullcone NAT for this zone. Requires the global Fullcone NAT gate to be enabled in General Settings. Use \"Fullcone protocols\" in Advanced Settings to restrict scope."
++msgstr "为此区域启用全锥形 NAT。需要在常规设置中开启全局全锥形 NAT 总开关。可在高级设置中通过「全锥形协议」限制范围。"
++
++msgid "Fullcone protocols"
++msgstr "全锥形协议"
++
++msgid "Restrict fullcone NAT to specific L4 protocols. When empty, all protocols use fullcone. Recommended: select only UDP for gaming/P2P use cases."
++msgstr "将全锥形 NAT 限制为特定的四层协议。留空则所有协议均使用全锥形 NAT。建议：游戏和 P2P 场景下仅选择 UDP。"
++
++msgid "All protocols"
++msgstr "所有协议"
