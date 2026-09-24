@@ -1,0 +1,25 @@
+From ddfe90416ddceae0aa66f6f1f8aef0d895ff8a22 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 15:03:36 +0800
+Subject: [PATCH] libnftnl: add the autoreconf fixup
+
+---
+ package/libs/libnftnl/Makefile | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/package/libs/libnftnl/Makefile b/package/libs/libnftnl/Makefile
+index dd0de5c8d6..d848826252 100644
+--- a/package/libs/libnftnl/Makefile
++++ b/package/libs/libnftnl/Makefile
+@@ -24,6 +24,8 @@ PKG_INSTALL:=1
+ PKG_BUILD_PARALLEL:=1
+ PKG_BUILD_FLAGS:=lto
+ 
++PKG_FIXUP:=autoreconf
++
+ include $(INCLUDE_DIR)/package.mk
+ 
+ DISABLE_NLS:=
+-- 
+2.43.0
+
