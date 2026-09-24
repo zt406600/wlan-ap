@@ -1,0 +1,33 @@
+# ---
+# nss-dp: stop reporting unprovisioned VP rings as a failure
+#
+# edma_cfg_rx_qid_to_rx_desc_ring_mapping() logs
+#     "Failed to initialize VP to queue map (0)"
+# on every board whose EDMA node does not declare "qcom,rx-vp-rings", although 0
+# is exactly the value edma_of_get_vp_pdata() stores for "VP rings not
+# configured" (with NSS_DP_VP_RINGS undefined, NSS_DP_VP_NUM_RINGS is 0 and a DT
+# entry would have tripped its BUG_ON() already).  Handle 0 as the no-op case and
+# keep the warning for values the driver cannot map.
+# ---
+--- a/hal/dp_ops/edma_dp/edma_v2/edma_cfg_rx.c
++++ b/hal/dp_ops/edma_dp/edma_v2/edma_cfg_rx.c
+@@ -917,6 +917,19 @@
+ 	 * Map the queues to vp ring
+ 	 */
+ 	switch (egc->rx_vp_rings) {
++	case 0:
++		/*
++		 * VP rings are not provisioned on this board: "qcom,rx-vp-rings"
++		 * is absent from the device tree or the feature is compiled out
++		 * (NSS_DP_VP_NUM_RINGS == 0, in which case a DT entry would have
++		 * tripped the BUG_ON() in edma_of_get_vp_pdata() already).
++		 * edma_of_get_vp_pdata() uses 0 as its "not configured" value and
++		 * the Rx descriptor ring init skips the VP ring marking for the
++		 * same value, hence there is nothing to map here and this is not
++		 * a failure.
++		 */
++		break;
++
+ 	case 1:
+ 		desc_index = egc->rxdesc_vp_ring_idx;
+ 

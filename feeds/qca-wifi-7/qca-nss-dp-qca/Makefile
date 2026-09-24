@@ -102,3 +102,15 @@ define Build/Compile
 endef
 
 $(eval $(call KernelPackage,qca-nss-dp-qca))
+
+# exports/nss_dp_vp.h includes <ppe_drv_public.h>, which the qca-nss-ppe package
+# installs into $(STAGING_DIR)/usr/include/qca-nss-ppe from its Build/InstallDev.
+# The DEPENDS entries above only order the image install step (apk/opkg), not the
+# compilation, so on a clean staging dir - or with a parallel build - this package
+# can be compiled before the header has been staged and the build fails with
+# "ppe_drv_public.h: No such file or directory".  Add an explicit build-time
+# prerequisite on qca-nss-ppe's install stamp so its InstallDev always runs first.
+NSS_PPE_INSTALLED:=$(STAGING_DIR)/stamp/.qca-nss-ppe_installed
+ifneq ($(filter y m,$(CONFIG_PACKAGE_kmod-qca-nss-ppe)),)
+$(STAMP_CONFIGURED): $(NSS_PPE_INSTALLED)
+endif
