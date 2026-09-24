@@ -1,0 +1,25 @@
+From 2bfe578eb81db287fbdd83427ffb23eea29dcdc5 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sun, 20 Sep 2026 15:03:36 +0800
+Subject: [PATCH] kernel: fix the kmod-phy-aquantia module path on ipq53xx
+
+---
+ package/kernel/linux/modules/netdevices.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package/kernel/linux/modules/netdevices.mk b/package/kernel/linux/modules/netdevices.mk
+index 6ec2851264..4a2c816106 100644
+--- a/package/kernel/linux/modules/netdevices.mk
++++ b/package/kernel/linux/modules/netdevices.mk
+@@ -627,7 +627,7 @@ define KernelPackage/phy-aquantia
+   TITLE:=Aquantia Ethernet PHYs
+   DEPENDS:=+kmod-libphy +kmod-hwmon-core +kmod-lib-crc-itu-t
+   KCONFIG:=CONFIG_AQUANTIA_PHY
+-  FILES:=$(LINUX_DIR)/drivers/net/phy/aquantia/aquantia.ko
++  FILES:=$(LINUX_DIR)/drivers/net/phy/aquantia.ko
+   AUTOLOAD:=$(call AutoLoad,18,aquantia,1)
+ endef
+ 
+-- 
+2.43.0
+
