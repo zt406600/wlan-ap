@@ -36,7 +36,7 @@ LINUX_VERSION_CODE test would not work: key off the macro instead.
 
  struct nft_masq {
  	u32			flags;
-@@ -128,6 +130,94 @@ static void nft_masq_eval(const struct n
+@@ -128,6 +130,95 @@ static void nft_masq_eval(const struct n
  	}
  }
 
@@ -61,7 +61,8 @@ LINUX_VERSION_CODE test would not work: key off the macro instead.
 +};
 +
 +static int nft_fullcone_validate(const struct nft_ctx *ctx,
-+				 const struct nft_expr *expr)
++				 const struct nft_expr *expr,
++				 const struct nft_data **data)
 +{
 +	int err;
 +
