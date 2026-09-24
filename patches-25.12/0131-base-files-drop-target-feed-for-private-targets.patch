@@ -1,0 +1,42 @@
+From 5f015fe22c2782526b59fa845c04c4be24d07d14 Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Sat, 20 Sep 2026 15:00:00 +0800
+Subject: [PATCH] base-files: drop the target feed entry for private targets
+
+The apk repository list produced by FeedSourcesAppendAPK always starts
+with
+
+    <repo>/targets/<target>/<subtarget>/packages/packages.adb
+
+That URL only resolves for targets actually published on the download
+server.  Private targets such as ipq53xx - which comes from the
+qca-wifi-7 feed and has no upstream release - always return 404 there,
+so every "apk update" reports a failing repository.
+
+Drop that single entry for ipq53xx.  The per-architecture feeds
+(<repo>/packages/<arch>/<feed>/) are left untouched and are the ones
+actually used for installing packages.
+
+Signed-off-by: leerep <leerep@163.com>
+---
+ package/base-files/Makefile | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/package/base-files/Makefile b/package/base-files/Makefile
+index affdc1d11b..9096c044bc 100644
+--- a/package/base-files/Makefile
++++ b/package/base-files/Makefile
+@@ -262,6 +262,10 @@ ifneq ($(CONFIG_USE_APK),)
+ 	mkdir -p $(1)/etc/apk/repositories.d
+ 	$(call FeedSourcesAppendAPK,$(1)/etc/apk/repositories.d/distfeeds.list)
+ 	$(VERSION_SED_SCRIPT) $(1)/etc/apk/repositories.d/distfeeds.list
++	# Private targets (e.g. ipq53xx) have no target package index on the
++	# upstream download server, so drop that entry to keep "apk update"
++	# from failing on a 404.
++	$(if $(filter ipq53xx,$(BOARD)),$(SED) '\|/targets/ipq53xx/|d' $(1)/etc/apk/repositories.d/distfeeds.list,)
+ 
+ 	rm -f $(1)/etc/uci-defaults/13_fix-group-user
+ 	rm -f $(1)/sbin/pkg_check
+-- 
+2.34.1
+
