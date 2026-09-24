@@ -8,7 +8,12 @@ PKG_RELEASE:=1
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/qca-nss-ecm
 PKG_SOURCE_VERSION:=7b7ea2753e0918c6c82318b80b87e8d45a3495a3
 PKG_VERSION:=1.0
-PKG_MIRROR_HASH:=4540caa40f0a694ca567c16d4c487752f065cc82ced524ecf95abe03e5373477
+# Hash of the tarball produced by the current (25.12) git download recipe.
+# The copy published for this revision (4540caa4...) was packed by an older
+# recipe that kept .git in the archive, so a local re-pack can never match it
+# and every build would re-fetch the sources.  Keep this value in sync with
+# the output of "make package/qca-nss-ecm/download" if tools/zstd changes.
+PKG_MIRROR_HASH:=48e1482c96f61bbcd34641aa9d5e32ab610812b8c642db34729bb5d485a4a226
 
 LOCAL_SRC:=$(TOPDIR)/qca/src/nss/clients/qca-nss-ecm
 
