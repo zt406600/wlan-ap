@@ -1,0 +1,111 @@
+From 8319523d2ae87b443ef694102e431545ea4cbcea Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Thu, 24 Sep 2026 12:00:03 +0800
+Subject: [PATCH] iptables: add the FULLCONE NAT target
+
+Register libxt_NAT's FULLCONE target so that iptables can install the rules
+firewall3 generates for a fullcone zone.  The target reuses MASQUERADE's
+options (--to-ports, --random, --random-fully) and its target size, and the
+kernel side is provided by 985-add-sonic-fullcone-to-ipt.patch of the
+qca-wifi-7 feed.
+
+Signed-off-by: leerep <leerep@163.com>
+---
+ .../iptables/patches/901-sonic-fullcone.patch | 85 +++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+ create mode 100644 package/network/utils/iptables/patches/901-sonic-fullcone.patch
+
+diff --git a/package/network/utils/iptables/patches/901-sonic-fullcone.patch b/package/network/utils/iptables/patches/901-sonic-fullcone.patch
+new file mode 100644
+index 0000000000..14f88edc61
+--- /dev/null
++++ b/package/network/utils/iptables/patches/901-sonic-fullcone.patch
+@@ -0,0 +1,85 @@
++From: openwrt-sonic-fullcone contributors
++Date: Wed, 9 Apr 2026 00:00:00 +0000
++Subject: [PATCH] libxt_NAT: register FULLCONE target for SONiC fullcone NAT
++
++Registers a new iptables target "FULLCONE" in libxt_NAT.c. The
++target reuses the same options as MASQUERADE (--to-ports, --random,
++--random-fully) and the same targetsize (nf_nat_ipv4_multi_range_compat
++for IPv4, nf_nat_range for IPv6).
++
++The kernel side (985 patch) implements the FULLCONE target with
++bidirectional hook support (PREROUTING + POSTROUTING), enabling both
++EIM and EIF for fw3/iptables.
++
++Usage:
++  iptables -t nat -A POSTROUTING -o wan -j FULLCONE
++  iptables -t nat -A PREROUTING  -i wan -j FULLCONE
++---
++--- a/extensions/libxt_NAT.c
+++++ b/extensions/libxt_NAT.c
++@@ -64,6 +64,18 @@ static void MASQUERADE_help(void)
++ "				Fully randomize source port.\n");
++ }
++ 
+++static void FULLCONE_help(void)
+++{
+++	printf(
+++"FULLCONE target options:\n"
+++" --to-ports <port>[-<port>]\n"
+++"				Port (range) to map to.\n"
+++" --random\n"
+++"				Randomize source port.\n"
+++" --random-fully\n"
+++"				Fully randomize source port.\n");
+++}
+++
++ static void DNAT_help(void)
++ {
++ 	printf(
++@@ -492,6 +504,12 @@ PSX_GEN(SNAT6, RANGE2_INIT_FROM_RANGE, \
++ PSX_GEN(MASQUERADE, RANGE2_INIT_FROM_IPV4_MRC, \
++ 	AF_INET, "masq ports: ", "--to-ports ", true, "masquerade")
++ 
+++PSX_GEN(FULLCONE, RANGE2_INIT_FROM_IPV4_MRC, \
+++	AF_INET, "fullcone ports: ", "--to-ports ", true, "fullcone")
+++
+++PSX_GEN(FULLCONE6, RANGE2_INIT_FROM_RANGE, \
+++	AF_INET6, "fullcone ports: ", "--to-ports ", true, "fullcone")
+++
++ PSX_GEN(MASQUERADE6, RANGE2_INIT_FROM_RANGE, \
++ 	AF_INET6, "masq ports: ", "--to-ports ", true, "masquerade")
++ 
++@@ -553,6 +571,33 @@ static struct xtables_target nat_tg_reg[
++ 		.xlate		= MASQUERADE6_xlate,
++ 	},
++ 	{
+++		.name		= "FULLCONE",
+++		.version	= XTABLES_VERSION,
+++		.family		= NFPROTO_IPV4,
+++		.size		= XT_ALIGN(sizeof(struct nf_nat_ipv4_multi_range_compat)),
+++		.userspacesize	= XT_ALIGN(sizeof(struct nf_nat_ipv4_multi_range_compat)),
+++		.help		= FULLCONE_help,
+++		.x6_parse	= NAT_parse,
+++		.x6_fcheck	= SNAT_fcheck,
+++		.print		= FULLCONE_print,
+++		.save		= FULLCONE_save,
+++		.x6_options	= MASQUERADE_opts,
+++		.xlate		= FULLCONE_xlate,
+++	},
+++	{
+++		.name		= "FULLCONE",
+++		.version	= XTABLES_VERSION,
+++		.family		= NFPROTO_IPV6,
+++		.size		= XT_ALIGN(sizeof(struct nf_nat_range)),
+++		.userspacesize	= XT_ALIGN(sizeof(struct nf_nat_range)),
+++		.help		= FULLCONE_help,
+++		.x6_parse	= NAT_parse6,
+++		.print		= FULLCONE6_print,
+++		.save		= FULLCONE6_save,
+++		.x6_options	= MASQUERADE_opts,
+++		.xlate		= FULLCONE6_xlate,
+++	},
+++	{
++ 		.name		= "REDIRECT",
++ 		.version	= XTABLES_VERSION,
++ 		.family		= NFPROTO_IPV4,
+-- 
+2.43.0
+
