@@ -1,0 +1,26 @@
+spi: spidev: add the missing "spidev" spi_device_id for "qti,spidev"
+
+0402-spi-spidev-add-compatible-string-qti-spidev.patch added the OF compatible
+"qti,spidev" to spidev_dt_ids[] but not the matching entry in
+spidev_spi_ids[].  __spi_register_driver() uses "spi:" modaliases (not "of:")
+for module autoloading, so it walks its own of_match_table and warns for every
+compatible that has no spi_device_id (vendor prefix stripped):
+
+  SPI driver spidev has no spi_device_id for qti,spidev
+
+Add the ID, following the existing pattern of "silabs,em3581" -> "em3581" and
+"siliconlabs,si3210" -> "si3210".  This only silences that boot warning and
+restores a consistent "spi:spidev" modalias; binding still happens exclusively
+through the OF compatible and spidev_of_check() still rejects a bare "spidev"
+node in DT.
+
+--- a/drivers/spi/spidev.c
++++ b/drivers/spi/spidev.c
+@@ -716,6 +716,7 @@
+ 	{ .name = "spi-authenta" },
+ 	{ .name = "em3581" },
+ 	{ .name = "si3210" },
++	{ .name = "spidev" },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(spi, spidev_spi_ids);
