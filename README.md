@@ -94,6 +94,10 @@ cd openwrt
 GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/gen_config.py jdcloud_er2
 GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/feeds install -a
 
+# 4b. feed checkout（luci 等）是独立 git 仓库，patches-25.12 是 git am 进 openwrt 树的，
+#     管不到它们；针对 feed 包的补丁放在 feeds-patches/<feed>/ 下，由这一步套用
+../setup.py --feed-patches
+
 # 5. 用仓库自带的完整配置替换上一步生成的最小系统配置，并归一化
 cp ../defconfig/jdc-er2.config .config
 GIT_CONFIG_GLOBAL=/tmp/git-mirror make defconfig
@@ -194,6 +198,45 @@ sed -i '/small-package/d' feeds.conf.default
 rm -rf feeds/smpackage feeds/smpackage.tmp
 #    再按下一节把该 feed 带来的符号在 menuconfig 里关掉
 ```
+
+### fullcone（SONiC 全锥形 NAT）
+
+内核侧是本仓库集成的 SONiC fullcone 补丁：`feeds/qca-wifi-7/ipq53xx/patches-6.6/`
+的 `0984`（`nf_nat_core` 的 3-tuple 哈希表，保证源端口映射端点无关）、`0985`
+（`xt_MASQUERADE` 的 `FULLCONE` target，iptables）与 `0986`（`nft_masq` 里的
+`fullcone` 表达式，nftables）；用户侧是 `patches-25.12/0132`–`0136`
+（libnftnl / nftables / iptables / firewall3 / firewall4）以及
+`feeds-patches/luci/` 里的 LuCI 界面补丁（防火墙页面的全局开关、区域开关与协议多选）。
+
+**不要再装 `kmod-nft-fullcone`**（`smpackage` 里的社区实现，仓库默认配置里已关掉）：
+它和 SONiC 的 `fullcone` 表达式同名，同时存在会互相抢占表达式注册，`nft_masq.ko`
+甚至可能加载失败（连带 masquerade 一起坏掉）。
+
+fullcone 默认不开（`menuconfig` 里也不需要额外勾选），按需用 uci 打开：
+
+```bash
+uci set firewall.@defaults[0].fullcone='1'             # 全局总开关
+uci set firewall.@zone[1].fullcone='1'                 # wan 区域，要求该区域已开 masq
+uci add_list firewall.@zone[1].fullcone_proto='udp'    # 可选：只让 udp 走全锥形
+uci commit firewall && /etc/init.d/firewall restart
+nft list ruleset | grep fullcone                       # 应看到 3 条 fullcone 规则
+```
+
+### 内核补丁放在哪里（qca feed 的 ipq53xx）
+
+ipq53xx 是 feed 提供的外部 target，它的内核补丁**只**从
+`feeds/qca-wifi-7/ipq53xx/patches-6.6/` 应用（该 target 的 Makefile 里只有
+`$(call PatchDir,$(LINUX_DIR),$(PATCH_DIR),platform/)` 这一处）。旁边的
+`generic/{backport,pending,hack}-6.6/` 不会被用到：`GENERIC_PLATFORM_DIR`
+在这个 target 下指向不存在的 `target/linux/feeds/linux/generic`，于是回退到
+openwrt 自带的 `target/linux/generic`，而那里只有 6.12 的目录。那几个目录是
+历史遗留，OpenWrt 的通用补丁早已被拍平进 `patches-6.6/`（例如
+`0012-OpenWrt-204-module_strip.patch.patch`），放进去的补丁会**静默失效**。
+
+新补丁放 `patches-6.6/`，编号取未占用的四位数。补丁按文件名排序依次应用，
+所以编号要排在它依赖或冲突的补丁之后（例如改 `net/netfilter/nf_nat_core.c`
+的补丁必须排在 `0441-*` 之后）。改完用
+`make target/linux/prepare V=s` 就能最快确认补丁是否真的应用上了。
 
 ### 关于第三方 feed `smpackage`
 

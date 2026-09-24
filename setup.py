@@ -90,6 +90,7 @@ def setup_tree():
 			["ln", "-rs", profiles, "profiles"], check=True,
 		)
 		print("### Patches done")
+		apply_feed_patches()
 	except:
 		print("### Setting up the tree failed")
 		sys.exit(1)
@@ -115,17 +116,53 @@ def update_patches():
 		os.chdir(base_dir)
 
 
+def apply_feed_patches():
+	try:
+		if not feed_patches.is_dir():
+			return
+
+		print("### Applying feed patches")
+		for folder in sorted(feed_patches.iterdir()):
+			if not folder.is_dir():
+				continue
+
+			feed_dir = Path(openwrt) / "feeds" / folder.name
+			if not feed_dir.is_dir():
+				print(f"### Feed {folder.name} is not checked out, skipping its patches")
+				continue
+
+			for patch in sorted(folder.glob("*.patch")):
+				check = run(
+					["git", "apply", "--check", "--reverse", str(patch)],
+					cwd=feed_dir,
+					capture_output=True,
+				)
+				if check.returncode == 0:
+					print(f"### Already applied: {folder.name}/{patch.name}")
+					continue
+
+				print(f"### Applying: {folder.name}/{patch.name}")
+				run(["git", "apply", str(patch)], cwd=feed_dir, check=True)
+
+		print("### Feed patches done")
+	except:
+		print("### Applying the feed patches failed")
+		sys.exit(1)
+
+
 base_dir = Path.cwd().absolute()
 setup = False
 update = False
 rebase = False
+feeds = False
 config = "config.yml"
 profiles = base_dir / "profiles"
+feed_patches = base_dir / "feeds-patches"
 openwrt = "openwrt"
 git_ref = ""
 
 try:
-	opts, args = getopt.getopt(sys.argv[1:], "srd:c:f:u2", ["setup", "rebase", "config=", "folder=", "reference=", "update", "20x", "directory=" ])
+	opts, args = getopt.getopt(sys.argv[1:], "srd:c:f:u2", ["setup", "rebase", "config=", "folder=", "reference=", "update", "20x", "directory=", "feed-patches" ])
 except getopt.GetoptError as err:
 	print(err)
 	sys.exit(2)
@@ -144,6 +181,8 @@ for o, a in opts:
 		git_ref = a
 	elif o in ("-d", "--directory"):
 		openwrt = a
+	elif o in ("--feed-patches",):
+		feeds = True
 	else:
 		assert False, "unhandled option"
 
@@ -162,3 +201,5 @@ elif rebase:
 	setup_tree()
 elif update:
 	update_patches()
+elif feeds:
+	apply_feed_patches()

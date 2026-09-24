@@ -22,6 +22,9 @@ cd ${BUILD_DIR}
 ./scripts/gen_config.py ${TARGET} || exit 1
 cd -
 
+echo "### Applying the feed patches ..."
+python3 setup.py --feed-patches || exit 1
+
 echo "### Building image ..."
 cd $BUILD_DIR
 make -j$(nproc) V=s
