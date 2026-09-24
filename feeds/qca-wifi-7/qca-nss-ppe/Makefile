@@ -4,11 +4,16 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_NAME:=qca-nss-ppe
 PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=master
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-ppe
-PKG_MIRROR_HASH:=8546d17c60978d56d30f21cd4a21f1d1936be348d0f92119802691688402edc1
-PKG_SOURCE_VERSION:=d53eff24bf257a8bb1b2f68beb3aa06332bfd567
+PKG_MIRROR_HASH:=b338f378ce60e3732a01a6bcaa6cb707b5ee662ab971bf34ea568f7b300cc60a
+PKG_SOURCE_VERSION:=5efb960b0872d57e39426dac538d7056e63b26c5
 PKG_VERSION:=1.0
+
+# r44 (5efb960b) upstream already carries the __maybe_unused markers that the
+# local 0001/0002 compilation-fix patches added (drv/ppe_drv/tun/ppe_drv_tun.c
+# and clients/pppoe/frontends/ppe/ppe_pppoe_mgr.c), so both patches were
+# dropped.  0003/0004 still apply to r44 unchanged.
 
 # Make the build dir (and hence the module set) depend on the client package
 # selections: OpenWrt encodes PKG_CONFIG_DEPENDS into the .configured stamp, so

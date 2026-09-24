@@ -1,17 +1,22 @@
-Index: qca-nss-dp-5cd7e43b5f76bb14de38ac8fe1805c367abef91a/nss_dp_main.c
-===================================================================
---- qca-nss-dp-5cd7e43b5f76bb14de38ac8fe1805c367abef91a.orig/nss_dp_main.c
-+++ qca-nss-dp-5cd7e43b5f76bb14de38ac8fe1805c367abef91a/nss_dp_main.c
-@@ -771,19 +771,30 @@ static int32_t nss_dp_probe(struct platf
+# Rebased onto r44 (nss-dp 4b72b4f4dff13f19c62e338c5131d9a29d198040).
+# Falls back to "eth%d" (NET_NAME_ENUM) when the DT node has no "label"
+# property, which is byte-for-byte the alloc_etherdev_mqs() behaviour this
+# replaces, so boards that do not set "label" are unaffected.
+diff --git a/nss_dp_main.c b/nss_dp_main.c
+index e0f2182..7c7194a 100644
+--- a/nss_dp_main.c
++++ b/nss_dp_main.c
+@@ -973,7 +973,9 @@ static int32_t nss_dp_probe(struct platform_device *pdev)
  	struct nss_dp_dev *dp_priv;
  	struct device_node *np = pdev->dev.of_node;
  	struct nss_gmac_hal_platform_data gmac_hal_pdata;
 +	const char *name = of_get_property(np, "label", NULL);
  	int32_t ret = 0;
- 	uint8_t phy_id[MII_BUS_ID_SIZE + 3];
 +	int assign_type;
- #if defined(NSS_DP_PPE_SUPPORT)
- 	uint32_t vsi_id;
+ #if (!defined(NSS_DP_IPQ96XX) && !defined(NSS_DP_IPQ52XX))
+ 	uint8_t phy_id[MII_BUS_ID_SIZE + 3];
+ #endif
+@@ -982,12 +984,21 @@ static int32_t nss_dp_probe(struct platform_device *pdev)
  	fal_port_t port_id;
  #endif
  
