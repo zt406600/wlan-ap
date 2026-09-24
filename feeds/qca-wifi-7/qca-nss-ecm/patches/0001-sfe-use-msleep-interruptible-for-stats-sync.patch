@@ -1,0 +1,36 @@
+From: local build tweak <local@localhost>
+Subject: [PATCH] sfe: use msleep_interruptible() for the stats-sync work
+
+msleep() sleeps with TASK_UNINTERRUPTIBLE, so the single-threaded SFE
+stats-sync worker sits in D state for most of its 1-second cycle. The
+kernel counts D-state tasks in the load average, so an otherwise idle
+system permanently reports a load of ~1.00.
+
+Use msleep_interruptible() instead: TASK_INTERRUPTIBLE sleeps are not
+counted by the load average. Workqueue workers are kernel threads and
+receive no signals, so the sleep semantics are unchanged.
+
+---
+
+--- a/frontends/sfe/ecm_sfe_ipv4.c
++++ b/frontends/sfe/ecm_sfe_ipv4.c
+@@ -811,7 +811,7 @@
+ 		}
+ 
+ 		if (time_after(ecm_sfe_ipv4_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv4_next_req_time - current_jiffies));
++			msleep_interruptible(jiffies_to_msecs(ecm_sfe_ipv4_next_req_time - current_jiffies));
+ 		}
+ 		ecm_sfe_ipv4_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv4_next_req_time = ecm_sfe_ipv4_roll_check_jiffies + ECM_SFE_IPV4_STATS_SYNC_PERIOD;
+--- a/frontends/sfe/ecm_sfe_ipv6.c
++++ b/frontends/sfe/ecm_sfe_ipv6.c
+@@ -808,7 +808,7 @@
+ 		}
+ 
+ 		if (time_after(ecm_sfe_ipv6_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv6_next_req_time - current_jiffies));
++			msleep_interruptible(jiffies_to_msecs(ecm_sfe_ipv6_next_req_time - current_jiffies));
+ 		}
+ 		ecm_sfe_ipv6_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv6_next_req_time = ecm_sfe_ipv6_roll_check_jiffies + ECM_SFE_IPV6_STATS_SYNC_PERIOD;
