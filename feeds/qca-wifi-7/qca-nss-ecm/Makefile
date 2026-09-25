@@ -4,16 +4,16 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_NAME:=qca-nss-ecm
 PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=master
-PKG_RELEASE:=2
+PKG_RELEASE:=1
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/qca-nss-ecm
-PKG_SOURCE_VERSION:=fb179711f6b9cd14675a34a5a847df881c18f847
+PKG_SOURCE_VERSION:=7b7ea2753e0918c6c82318b80b87e8d45a3495a3
 PKG_VERSION:=1.0
 # Hash of the tarball produced by the current (25.12) git download recipe.
 # The copy published for this revision (4540caa4...) was packed by an older
 # recipe that kept .git in the archive, so a local re-pack can never match it
 # and every build would re-fetch the sources.  Keep this value in sync with
 # the output of "make package/qca-nss-ecm/download" if tools/zstd changes.
-PKG_MIRROR_HASH:=cc2ee17fe6f5909ac026b62dfaf31e7f8a6b3f936168aa6b8381a3ea20604979
+PKG_MIRROR_HASH:=48e1482c96f61bbcd34641aa9d5e32ab610812b8c642db34729bb5d485a4a226
 
 LOCAL_SRC:=$(TOPDIR)/qca/src/nss/clients/qca-nss-ecm
 
@@ -334,25 +334,6 @@ ECM_MAKE_OPTS+=ECM_INTERFACE_BOND_ENABLE=y
 endif
 endif
 endif
-
-#
-# PPPoE / PPP interface support.
-#
-# The ECM source used to hard-code "ECM_INTERFACE_PPPOE_ENABLE=y" and to derive
-# "ECM_INTERFACE_PPP_ENABLE" from the PPPoE/PPTP/L2TPv2 selection.  The r44
-# update (PKG_SOURCE_VERSION 7b7ea275 -> fb179711) removed both defaults and now
-# expects the caller to pass them.
-#
-# Without ECM_INTERFACE_PPPOE_ENABLE the IPv4 front end has no node address
-# handling for ECM_DB_IFACE_TYPE_PPPOE: ecm_ipv4_node_establish_and_ref()
-# returns NULL, so every interface hierarchy that contains the PPPoE WAN fails
-# to establish its source/destination node.  As a result no ECM connection is
-# ever created, /sys/kernel/debug/ecm/ecm_db/* stays empty and PPE acceleration
-# is never used on a PPPoE WAN (visible as ever growing
-# v4_ported_{from,to}_node_fail counters in ecm_v4_exception_stats).
-#
-ECM_MAKE_OPTS+=ECM_INTERFACE_PPPOE_ENABLE=y
-ECM_MAKE_OPTS+=ECM_INTERFACE_PPP_ENABLE=y
 
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 ifneq ($(CONFIG_LOWMEM_FLASH),y)
