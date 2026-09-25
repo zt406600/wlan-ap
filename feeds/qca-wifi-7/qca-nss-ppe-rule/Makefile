@@ -4,10 +4,10 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_NAME:=qca-nss-ppe-rule
 PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=master
-PKG_RELEASE:=3
+PKG_RELEASE:=2
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-ppe
-PKG_MIRROR_HASH:=cef37e2661f27bc4726e27808c9cdbb5cc4f709680e625358da5fdaff7036c32
-PKG_SOURCE_VERSION:=5efb960b0872d57e39426dac538d7056e63b26c5
+PKG_MIRROR_HASH:=8203b75977eab574166d79cc2f67a8db76f6867067d317eb108da4649cf91d3b
+PKG_SOURCE_VERSION:=d53eff24bf257a8bb1b2f68beb3aa06332bfd567
 PKG_VERSION:=1.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -49,13 +49,7 @@ define Build/InstallDev
 	$(call Build/InstallDev/qca-nss-ppe-rule,$(1))
 endef
 
-# ppe_rule.c and ppe_acl.c include the PPE core headers (<ppe_drv.h>,
-# <ppe_acl.h>, <ppe_drv_public.h>), which qca-nss-ppe only installs into staging
-# during its own install step; use this package's own copy to stay clear of
-# that ordering, exactly as qca-nss-ppe-ds does.
 EXTRA_CFLAGS+= \
-	-I$(PKG_BUILD_DIR)/exports \
-	-I$(PKG_BUILD_DIR)/drv/exports \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk/fal \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk/init \

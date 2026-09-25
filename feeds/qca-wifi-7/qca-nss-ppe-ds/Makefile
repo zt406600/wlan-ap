@@ -4,10 +4,10 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_NAME:=qca-nss-ppe-ds
 PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=ginger_open
-PKG_RELEASE:=3
+PKG_RELEASE:=2
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-ppe
-PKG_MIRROR_HASH:=e666aeda7f845fd52a1df8ec9184ea28b9e552fb7ce908d7fa0eacc2322d4e97
-PKG_SOURCE_VERSION:=5efb960b0872d57e39426dac538d7056e63b26c5
+PKG_MIRROR_HASH:=ea6112c0176a58fd8397f954578c35ba7f9b8f33a8b1f07124fcc6735fa86e9e
+PKG_SOURCE_VERSION:=d53eff24bf257a8bb1b2f68beb3aa06332bfd567
 PKG_VERSION:=1.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -58,15 +58,9 @@ define Build/InstallDev
 	$(call Build/InstallDev/qca-nss-ppe-ds,$(1))
 endef
 
-# drv/ppe_ds/exports/ppe_ds_wlan.h pulls in <ppe_vp_public.h> (drv/exports)
-# and <nss_plugins.h> (exports).  qca-nss-ppe installs both into staging, but
-# a parallel build can reach this package's compile before that install step
-# has run, so point at this package's own (same commit) copy as well.
 EXTRA_CFLAGS+= \
 	-I$(STAGING_DIR)/usr/include/qca-nss-ppe \
-	-I$(STAGING_DIR)/usr/include/qca-nss-dp \
-	-I$(PKG_BUILD_DIR)/exports \
-	-I$(PKG_BUILD_DIR)/drv/exports
+	-I$(STAGING_DIR)/usr/include/qca-nss-dp
 
 MAKE_OPTS+=ppe-ds=y
 

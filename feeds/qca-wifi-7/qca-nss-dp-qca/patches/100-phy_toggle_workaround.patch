@@ -1,30 +1,15 @@
-# Rebased onto r44 (nss-dp 4b72b4f4dff13f19c62e338c5131d9a29d198040).
-# r44 moved the PHY stop into a phylink aware else branch of nss_dp_close()
-# and added an else branch PHY start in nss_dp_open().  The workaround
-# semantics are unchanged: keep the PHY running while the interface is down
-# and make sure it is stopped before it is disconnected on remove.
-diff --git a/nss_dp_main.c b/nss_dp_main.c
-index 7c7194a..66fb196 100644
 --- a/nss_dp_main.c
 +++ b/nss_dp_main.c
-@@ -370,11 +370,13 @@ static int nss_dp_close(struct net_device *netdev)
+@@ -335,8 +335,6 @@ static int nss_dp_close(struct net_devic
  		return -EAGAIN;
  	}
  
-+	/*
-+	 * phy_toggle_workaround: the PHY is deliberately left running while
-+	 * the interface is down.  Stopping it here makes the link toggle on
-+	 * every close/open cycle.
-+	 */
- 	if (dp_priv->phylink_en && dp_priv->phylink) {
- 		phylink_stop(dp_priv->phylink);
--	} else {
--		if (dp_priv->phydev)
--			phy_stop(dp_priv->phydev);
- 	}
+-	if (dp_priv->phydev)
+-		phy_stop(dp_priv->phydev);
  	dp_priv->link_state = __NSS_DP_LINK_DOWN;
  
-@@ -515,7 +517,12 @@ static int nss_dp_open(struct net_device *netdev)
+ #if defined(NSS_DP_PPE_SUPPORT)
+@@ -474,7 +472,12 @@ static int nss_dp_open(struct net_device
  		netif_carrier_on(netdev);
  	} else {
  		dp_priv->link_state = __NSS_DP_LINK_DOWN;
@@ -38,17 +23,14 @@ index 7c7194a..66fb196 100644
  		phy_start_aneg(dp_priv->phydev);
  	}
  
-@@ -1207,6 +1214,13 @@ static int nss_dp_remove(struct platform_device *pdev)
- 			dp_priv->phylink = NULL;
- 		} else {
- 			if (dp_priv->phydev) {
-+				/*
-+				 * phy_toggle_workaround: the PHY was left
-+				 * started while the interface was up, so make
-+				 * sure it is stopped before disconnecting.
-+				 */
-+				if (phy_is_started(dp_priv->phydev))
-+					phy_stop(dp_priv->phydev);
- 				phy_disconnect(dp_priv->phydev);
- 				dp_priv->phydev = NULL;
- 			}
+@@ -1088,6 +1091,10 @@ static int nss_dp_remove(struct platform
+ 		dp_ops = dp_priv->data_plane_ops;
+ 		hal_ops = dp_priv->gmac_hal_ops;
+ 
++		if (phy_is_started(dp_priv->phydev))
++			phy_stop(dp_priv->phydev);
++
++
+ 		if (dp_priv->phydev) {
+ 			phy_disconnect(dp_priv->phydev);
+ 			dp_priv->phydev = NULL;
