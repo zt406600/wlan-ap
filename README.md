@@ -78,10 +78,11 @@ sudo apt install build-essential libncurses5-dev gawk git libssl-dev gettext \
 git clone -b er2 https://github.com/zt406600/wlan-ap.git wlan-ap-er2
 cd wlan-ap-er2
 
-# 2. 拉 OpenWrt 源码（config.yml 里固定到 openwrt-25.12 @ 3f081e25，默认走 gh-proxy 镜像）
+# 2. 拉 OpenWrt 源码（config.yml 里固定到 openwrt-25.12 @ f0a60eee，即 v25.12.5 基线，默认走 gh-proxy 镜像）
 #    + 应用 patches-25.12（ER2 板级支持、NSS/PPE/ECM、fullcone、默认密码、extra feeds…）
 #    + 把本仓库的 profiles/ 链接进 openwrt/
-./setup.py --setup
+./setup.py --setup          # 首次；openwrt/ 已存在时改用 ./setup.py --rebase（git fetch +
+                            # reset --hard 到 config.yml 的 revision + 按文件名顺序重打全部补丁）
 
 # 3. 国内网络建议先准备一个"只对本终端生效"的 git 镜像，
 #    否则下一步扫描 feed 时可能在 feeds/smpackage/dockerd 上卡住（详见下面的注意事项）
