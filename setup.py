@@ -90,6 +90,9 @@ def setup_tree():
 			["ln", "-rs", profiles, "profiles"], check=True,
 		)
 		print("### Patches done")
+		# Feeds are looked up relative to the repository root, so get back there
+		# before applying the feed patches (cwd is openwrt/ at this point).
+		os.chdir(base_dir)
 		apply_feed_patches()
 	except:
 		print("### Setting up the tree failed")

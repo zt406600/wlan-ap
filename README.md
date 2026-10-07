@@ -97,7 +97,8 @@ GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/feeds install -a
 
 # 4b. feed checkout（luci 等）是独立 git 仓库，patches-25.12 是 git am 进 openwrt 树的，
 #     管不到它们；针对 feed 包的补丁放在 feeds-patches/<feed>/ 下，由这一步套用
-../setup.py --feed-patches
+#     要在仓库根目录执行（setup.py 从仓库根解析 config.yml 与 feeds-patches/）
+( cd .. && ./setup.py --feed-patches )
 
 # 5. 用仓库自带的完整配置替换上一步生成的最小系统配置，并归一化
 cp ../defconfig/jdc-er2.config .config
