@@ -1,25 +1,33 @@
-From eb4dbfb8e7d2b2ce052efdfb56eba74a2ea2608c Mon Sep 17 00:00:00 2001
+From 7bd6e131312a1151dff66b6f02ebdbb377ce88a1 Mon Sep 17 00:00:00 2001
 From: leerep <leerep@163.com>
 Date: Thu, 24 Sep 2026 12:00:03 +0800
 Subject: [PATCH] nftables: add the fullcone expression support
 
-Port of Syrone Wong's nftables fullcone expression patch, kept verbatim (see
-the From: line of the added file).  It adds the "fullcone" statement with its
+Port of Syrone Wong's nftables fullcone expression patch, synced with
+openwrt-sonic-fullcone 43cb206.  It adds the "fullcone" statement with its
 parser/scanner keywords, the linearize and delinearize support and the UAPI
 attributes, so that firewall4 can emit fullcone SNAT rules.
 
+43cb206 makes the patch version independent between 1.1.1/1.1.6 and 1.1.7:
+the scanner keyword is written <*>"fullcone" (1.1.7 added the exclusive
+SCANSTATE_RATE start condition, where only <*> rules fire; 1.1.6 and older
+have no %x states at all, so the prefix is a no-op) and the rule moved right
+after the NAT start-condition block, and fullcone_stmt gets its own
+%type/%destructor lines instead of editing the nat_stmt ones, whose
+neighbouring declarations were renamed in 1.1.7.
+
 Signed-off-by: leerep <leerep@163.com>
 ---
- ...bles-add-fullcone-expression-support.patch | 209 ++++++++++++++++++
- 1 file changed, 209 insertions(+)
+ ...bles-add-fullcone-expression-support.patch | 208 ++++++++++++++++++
+ 1 file changed, 208 insertions(+)
  create mode 100644 package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
 
 diff --git a/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch b/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
 new file mode 100644
-index 0000000000..8faa15112b
+index 0000000..9d006e4
 --- /dev/null
 +++ b/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,208 @@
 +From 58c89e8768711a959fdc6e953df3ea2254ff93c1 Mon Sep 17 00:00:00 2001
 +From: Syrone Wong <wong.syrone@gmail.com>
 +Date: Sat, 9 Apr 2022 00:38:51 +0800
@@ -31,10 +39,10 @@ index 0000000000..8faa15112b
 + include/statement.h                 |  1 +
 + src/netlink_delinearize.c           | 48 +++++++++++++++++++++++++++++
 + src/netlink_linearize.c             |  7 +++++
-+ src/parser_bison.y                  | 28 +++++++++++++++--
-+ src/scanner.l                       |  1 +
++ src/parser_bison.y                  | 26 ++++++++++++++++
++ src/scanner.l                       |  2 ++
 + src/statement.c                     |  1 +
-+ 7 files changed, 100 insertions(+), 2 deletions(-)
++ 7 files changed, 101 insertions(+)
 +
 +--- a/include/linux/netfilter/nf_tables.h
 ++++ b/include/linux/netfilter/nf_tables.h
@@ -161,18 +169,16 @@ index 0000000000..8faa15112b
 + %token REDIRECT			"redirect"
 + %token RANDOM			"random"
 + %token FULLY_RANDOM		"fully-random"
-+@@ -814,8 +815,8 @@ int nft_lex(void *, void *, void *);
-+ %type <val>			limit_burst_pkts limit_burst_bytes limit_mode limit_bytes time_unit quota_mode
-+ %type <stmt>			reject_stmt reject_stmt_alloc
++@@ -816,6 +817,8 @@ int nft_lex(void *, void *, void *);
 + %destructor { stmt_free($$); }	reject_stmt reject_stmt_alloc
-+-%type <stmt>			nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc redir_stmt redir_stmt_alloc
-+-%destructor { stmt_free($$); }	nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc redir_stmt redir_stmt_alloc
-++%type <stmt>			nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc fullcone_stmt fullcone_stmt_alloc redir_stmt redir_stmt_alloc
-++%destructor { stmt_free($$); }	nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc fullcone_stmt fullcone_stmt_alloc redir_stmt redir_stmt_alloc
++ %type <stmt>			nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc redir_stmt redir_stmt_alloc
++ %destructor { stmt_free($$); }	nat_stmt nat_stmt_alloc masq_stmt masq_stmt_alloc redir_stmt redir_stmt_alloc
+++%type <stmt>			fullcone_stmt fullcone_stmt_alloc
+++%destructor { stmt_free($$); }	fullcone_stmt fullcone_stmt_alloc
 + %type <val>			nf_nat_flags nf_nat_flag offset_opt
 + %type <stmt>			tproxy_stmt
 + %destructor { stmt_free($$); }	tproxy_stmt
-+@@ -3274,6 +3275,7 @@ stmt			:	verdict_stmt
++@@ -3274,6 +3277,7 @@ stmt			:	verdict_stmt
 + 			|	queue_stmt
 + 			|	ct_stmt
 + 			|	masq_stmt	close_scope_nat
@@ -180,7 +186,7 @@ index 0000000000..8faa15112b
 + 			|	redir_stmt	close_scope_nat
 + 			|	dup_stmt	close_scope_dup
 + 			|	fwd_stmt	close_scope_fwd
-+@@ -4105,6 +4107,28 @@ masq_stmt_args		:	TO 	COLON	stmt_expr
++@@ -4105,6 +4109,28 @@ masq_stmt_args		:	TO 	COLON	stmt_expr
 + 			{
 + 				$<stmt>0->nat.proto = $3;
 + 			}
@@ -211,14 +217,15 @@ index 0000000000..8faa15112b
 + 				$<stmt>0->nat.proto = $3;
 +--- a/src/scanner.l
 ++++ b/src/scanner.l
-+@@ -470,6 +470,7 @@ addrstring	({macaddr}|{ip4addr}|{ip6addr
-+ "snat"			{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return SNAT; }
-+ "dnat"			{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return DNAT; }
-+ "masquerade"		{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return MASQUERADE; }
-++"fullcone"		{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return FULLCONE; }
-+ "redirect"		{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return REDIRECT; }
-+ "random"		{ return RANDOM; }
-+ <SCANSTATE_STMT_NAT>{
++@@ -478,6 +478,8 @@ addrstring	({macaddr}|{ip4addr}|{ip6addr
++ 	"port"			{ return PORT; }
++ }
++ 
+++<*>"fullcone"		{ scanner_push_start_cond(yyscanner, SCANSTATE_STMT_NAT); return FULLCONE; }
+++
++ <SCANSTATE_AT>{
++ 	"ll"			{ return LL_HDR; }
++ 	"nh"			{ return NETWORK_HDR; }
 +--- a/src/statement.c
 ++++ b/src/statement.c
 +@@ -681,6 +681,7 @@ const char *nat_etype2str(enum nft_nat_e

@@ -1,4 +1,4 @@
-From 232931f87478047394f5e6787045ba4e3a906d9a Mon Sep 17 00:00:00 2001
+From 60b8b31f4f10931bc1cca973fea3b5f5ae0415cc Mon Sep 17 00:00:00 2001
 From: leerep <leerep@163.com>
 Date: Thu, 24 Sep 2026 12:00:03 +0800
 Subject: [PATCH] firewall4: add the sonic fullcone options
@@ -8,21 +8,29 @@ fullcone, per-zone fullcone_proto) and emit the fullcone statement on the SNAT
 rules.  Every protocol with a port range gets one, because the 3-tuple
 uniqueness check of the fullcone NAT core only runs in its port-range branch.
 
+Synced with openwrt-sonic-fullcone c30deb9 and 454ab55, both of which only
+exist to keep the patch applying on firewall4 2026-10-26/2026-10-29:
+"fullcone" is now listed among the rule keywords right after "dscp" instead of
+after "masquerade", and a fullcone zone sets zone.auto_helper = false instead
+of rewriting the helper condition line.  The statement grammar the patch
+relies on is unchanged, and both hunks still apply to the firewall4 2025-03-17
+this tree pins.
+
 Depends on the libnftnl/nftables fullcone expression patches and on the kernel
 side shipped by the qca-wifi-7 feed.
 
 Signed-off-by: leerep <leerep@163.com>
 ---
- .../patches/001-sonic-fullcone.patch          | 262 ++++++++++++++++++
- 1 file changed, 262 insertions(+)
+ .../patches/001-sonic-fullcone.patch          | 259 ++++++++++++++++++
+ 1 file changed, 259 insertions(+)
  create mode 100644 package/network/config/firewall4/patches/001-sonic-fullcone.patch
 
 diff --git a/package/network/config/firewall4/patches/001-sonic-fullcone.patch b/package/network/config/firewall4/patches/001-sonic-fullcone.patch
 new file mode 100644
-index 0000000000..944638d4d6
+index 0000000..dcfad45
 --- /dev/null
 +++ b/package/network/config/firewall4/patches/001-sonic-fullcone.patch
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,259 @@
 +From: openwrt-sonic-fullcone contributors
 +Date: Wed, 9 Apr 2026 00:00:00 +0000
 +Subject: [PATCH] firewall4: add SONiC fullcone NAT with per-zone and
@@ -51,7 +59,7 @@ index 0000000000..944638d4d6
 + root/usr/share/firewall4/templates/ruleset.uc      |   48 +++++++++++++
 + .../usr/share/firewall4/templates/zone-fullcone.uc |   33 +++++++++
 + root/usr/share/ucode/fw4.uc                        |   72 +++++++++++++++++++-
-+ 3 files changed, 149 insertions(+), 4 deletions(-)
++ 3 files changed, 150 insertions(+), 3 deletions(-)
 + create root/usr/share/firewall4/templates/zone-fullcone.uc
 +
 +--- a/root/usr/share/firewall4/templates/ruleset.uc
@@ -192,14 +200,14 @@ index 0000000000..944638d4d6
 + 
 + return {
 + 	read_kernel_version: function() {
-+@@ -1475,6 +1498,7 @@ return {
++@@ -1472,6 +1495,7 @@ return {
++ 			"helper",
++ 			"mark",
++ 			"dscp",
+++			"fullcone",
 + 			"dnat",
 + 			"snat",
 + 			"masquerade",
-++			"fullcone",
-+ 			"accept",
-+ 			"reject",
-+ 			"drop"
 +@@ -1946,6 +1970,7 @@ return {
 + 		}
 + 
@@ -261,8 +269,7 @@ index 0000000000..944638d4d6
 + 		if (zone.mtu_fix && this.kernel < 0x040a0000) {
 + 			this.warn_section(data, "option 'mtu_fix' requires kernel 4.10 or later");
 + 			return;
-+@@ -2205,10 +2262,21 @@ return {
-+ 		zone.related_subnets = related_subnets;
++@@ -2206,6 +2263,19 @@ return {
 + 		zone.related_physdevs = related_physdevs;
 + 
 +-		if (zone.masq || zone.masq6)
@@ -277,14 +284,12 @@ index 0000000000..944638d4d6
 ++			if (zone.fullcone6)
 ++				zone.dflags.dnat = true;
 ++		}
+++
+++		/* Like masq zones, fullcone zones get no automatic helpers. */
+++		if (zone.fullcone || zone.fullcone6)
+++			zone.auto_helper = false;
 + 
-+-		if ((zone.auto_helper && !(zone.masq || zone.masq6)) || length(zone.helper)) {
-++		if ((zone.auto_helper && !(zone.masq || zone.masq6 ||
-++		     zone.fullcone || zone.fullcone6)) ||
-++		    length(zone.helper)) {
-+ 			zone.dflags.helper = true;
-+ 
-+ 			for (let helper in (length(zone.helper) ? zone.helper : this.state.helpers)) {
++ 		if ((zone.auto_helper && !(zone.masq || zone.masq6)) || length(zone.helper)) {
 -- 
 2.43.0
 

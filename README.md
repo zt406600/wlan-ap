@@ -219,6 +219,13 @@ rm -rf feeds/smpackage feeds/smpackage.tmp
 本 target 是 6.6，仍用三参数签名和 `#ifdef NFT_REDUCE_READONLY` 的兼容写法，
 只补上了末尾 hunk 的上下文（不再需要 fuzz）。
 
+用户侧同样跟到上游 HEAD：`0208` libnftnl 与 `0209` nftables 取 `43cb206`（setter
+按 `_Generic` 在 1.3.2 的 `byteorder` 参数与旧签名之间选择，`<*>` scanner 前缀兼容
+1.1.6/1.1.7），`0212` firewall4 取 `c30deb9`/`454ab55`；`0210` iptables 与 `0211`
+firewall3 上游没再改。这些补丁在本树固定的 libnftnl 1.3.1 / nftables 1.1.6 /
+firewall4 2025-03-17 上重新验过：`git apply --check` 与 `patch --dry-run` 均无 fuzz，
+`bison`/`flex` 通过，`fullcone.c` 用 1.3.1 的头文件 `-fsyntax-only` 无错。
+
 [openwrt-sonic-fullcone]: https://github.com/mufeng05/openwrt-sonic-fullcone
 
 **不要再装 `kmod-nft-fullcone`**（`smpackage` 里的社区实现，仓库默认配置里已关掉）：
