@@ -79,13 +79,13 @@ git clone -b er2 https://github.com/zt406600/wlan-ap.git wlan-ap-er2
 cd wlan-ap-er2
 
 # 2. 拉 OpenWrt 源码（config.yml 里固定到 openwrt-25.12 @ f0a60eee，即 v25.12.5 基线，默认走 gh-proxy 镜像）
-#    + 应用 patches-25.12（ER2 板级支持、NSS/PPE/ECM、fullcone、默认密码、extra feeds…）
+#    + 应用 patches-25.12（ER2 板级支持、NSS/PPE/ECM、fullcone、默认密码…）
 #    + 把本仓库的 profiles/ 链接进 openwrt/
 ./setup.py --setup          # 首次；openwrt/ 已存在时改用 ./setup.py --rebase（git fetch +
                             # reset --hard 到 config.yml 的 revision + 按文件名顺序重打全部补丁）
 
 # 3. 国内网络建议先准备一个"只对本终端生效"的 git 镜像，
-#    否则下一步扫描 feed 时可能在 feeds/smpackage/dockerd 上卡住（详见下面的注意事项）
+#    否则下一步克隆 github 上的 feed（video）时会很慢（详见下面的注意事项）
 printf '[url "https://gh-proxy.org/https://github.com/"]\n\tinsteadOf = https://github.com/\n' > /tmp/git-mirror
 
 # 4. 准备 feed：gen_config.py 按 profile 生成 feeds.conf（含 qca feed 与 ipq53xx target）、
@@ -115,7 +115,7 @@ make -j$(nproc) V=s
 
 - **完整 LuCI 网页界面**：`luci`、`luci-ssl`、`luci-mod-admin-full`、`luci-mod-{network,status,system}`、
   `luci-app-firewall`、`luci-app-package-manager`、`luci-app-upnp`、
-  `luci-proto-{ppp,ipv6,relay}`、`luci-theme-argon` + `luci-theme-bootstrap`、简体中文语言包；
+  `luci-proto-{ppp,ipv6,relay}`、`luci-theme-bootstrap`、简体中文语言包；
 - **QCA 硬件加速**：`kmod-qca-nss-dp-qca`、`kmod-qca-nss-phy`、`kmod-qca-nss-ppe`
   (+`-bridge-mgr`/`-vlan-mgr`/`-netlink`/`-pppoe-mgr`/`-ds`/`-rule`/`-vp`)、`kmod-qca-nss-sfe`、
   `kmod-qca-nss-ecm-standard`、`kmod-qca-ssdk-qca-nohnat`、`qca-ssdk-shell`、`kmod-qca8084`、
@@ -161,7 +161,7 @@ make package/luci-app-ddns/compile     # 只编这一个包，依赖会一起编
 ```
 
 产物在 `openwrt/bin/packages/<arch>/<feed>/`（ER2 的 arch 是 `aarch64_cortex-a53`，
-feed 目录为 `base`/`luci`/`packages`/`qca`/`routing`/`smpackage`/`telephony`/`video`）。
+feed 目录为 `base`/`luci`/`packages`/`qca`/`routing`/`telephony`/`video`）。
 本固件用的是 OpenWrt 25.12 的 `apk` 包管理（`CONFIG_USE_APK=y`，安装包后缀是 `*.apk`），
 拷到设备上 `apk add --allow-untrusted xxx.apk` 安装即可；内核模块在
 `openwrt/bin/targets/ipq53xx/generic/packages/`。也可以在 LuCI 的
@@ -183,23 +183,27 @@ cd openwrt && cp .config ../defconfig/jdc-er2.config
 
 ### 注意事项
 
-`make defconfig`/`feeds update` 会把所有 feed 的软件包元数据扫一遍（几分钟）。其中
-`feeds/smpackage/dockerd`、`feeds/smpackage/rblibtorrent` 的 Makefile 会联网访问
-`github.com`（`git ls-remote`）和 `codeload.github.com`（tar 包），国内直连常常卡住。三种处理：
+`make defconfig`/`feeds update` 会把所有 feed 的软件包元数据扫一遍（几分钟）。
+feed 里少数包的 Makefile 会在扫描阶段联网（`git ls-remote`、`codeload.github.com` 的 tar 包），
+国内直连可能卡住；`video` feed 本身也在 github 上。两种处理：
 
 ```bash
 # a) 有代理：直接让它对所有下载生效（最稳妥，git 和 tar 包都覆盖）
 export http_proxy=http://127.0.0.1:7890 https_proxy=http://127.0.0.1:7890
 
 # b) 只用 git 镜像（即上面第 3 步的 /tmp/git-mirror）：能覆盖 github.com 的 git 操作，
-#    实测可以顺利扫完整个 smpackage（含 dockerd/rblibtorrent）；
-#    如果你这边仍卡住，说明卡在 codeload.github.com 的 tar 包下载，退回用 a) 的代理
-
-# c) 干脆不要 smpackage feed：
-sed -i '/small-package/d' feeds.conf.default
-rm -rf feeds/smpackage feeds/smpackage.tmp
-#    再按下一节把该 feed 带来的符号在 menuconfig 里关掉
+#    若仍卡住，说明卡在 codeload.github.com 的 tar 包下载，退回用 a) 的代理
 ```
+
+本仓库**不包含** 第三方大杂烩 feed（例如 `kenzok8/small-package`）：
+`feeds.conf.default` 与上游 wlan-ap 一致，只有 base/luci/packages/qca/routing/telephony/video。
+需要时自己加（`src-git smpackage https://github.com/kenzok8/small-package`），但请自己 pin commit ——
+它每天自动更新，2026-10 就因为 `luci-app-homeproxy` 把依赖抬到 `sing-box>=1.15.0_alpha10`
+而把当时的构建打挂过。
+
+`defconfig/jdc-er2.config` 里还有几个包本仓库不含源码（`luci-app-wolultra`、
+`luci-app-mini-diskmanager`、`luci-theme-aurora`），`make defconfig` 会因找不到对应符号
+自动忽略这几行，不影响编译；需要就把源码放进 `openwrt/package/`（见「增删软件包」）。
 
 ### fullcone（SONiC 全锥形 NAT）
 
@@ -228,7 +232,7 @@ firewall4 2025-03-17 上重新验过：`git apply --check` 与 `patch --dry-run`
 
 [openwrt-sonic-fullcone]: https://github.com/mufeng05/openwrt-sonic-fullcone
 
-**不要再装 `kmod-nft-fullcone`**（`smpackage` 里的社区实现，仓库默认配置里已关掉）：
+**不要再装 `kmod-nft-fullcone`**（社区实现，仓库默认配置里已关掉，第三方 feed 里才有）：
 它和 SONiC 的 `fullcone` 表达式同名，同时存在会互相抢占表达式注册，`nft_masq.ko`
 甚至可能加载失败（连带 masquerade 一起坏掉）。
 
@@ -265,30 +269,6 @@ openwrt 自带的 `target/linux/generic`，而那里只有 6.12 的目录。那�
 `0124`–`0136`，每同步一次就得给上游的新补丁挪号（见 `a5bbf655`）；现在上游的
 `01xx` 与本仓库逐字节一致，同步时不会再产生编号冲突。新补丁直接取 `02xx` 里
 下一个未占用的号。
-
-### 关于第三方 feed `smpackage`
-
-`patches-25.12/0203-feeds-add-smpackage-feed.patch` 会加一个指向
-`https://github.com/kenzok8/small-package` 的 `src-git smpackage` feed（**没有锁定 commit**）。
-`.config` 里 `luci-theme-argon`、`autocore-arm`、`kmod-nft-fullcone`（fullcone 的内核模块，
-来自该 feed 的 `fullconenat-nft`）、`luci-app-daede_daed`、`luci-app-ssr-plus_*` 这些符号都来自它，
-上游更新后编出来的版本会跟着变。要固定就自己 pin 一个 commit：
-
-```bash
-sed -i 's#kenzok8/small-package$#kenzok8/small-package^<commit>#' openwrt/feeds.conf.default
-./scripts/feeds update smpackage
-```
-
-不需要这个 feed 就去掉（顺手在 menuconfig 里把上面那几个符号关掉）：
-
-```bash
-sed -i '/small-package/d' openwrt/feeds.conf.default
-rm -rf openwrt/feeds/smpackage openwrt/feeds/smpackage.tmp
-```
-
-`defconfig/jdc-er2.config` 里还有几个包本仓库不含源码（`luci-app-wolultra`、
-`luci-app-mini-diskmanager`、`luci-theme-aurora`），`make defconfig` 会因找不到对应符号
-自动忽略这几行，不影响编译；需要就把源码放进 `openwrt/package/`（见「增删软件包」）。
 
 ### 用方式 A（`./build.sh`）加包
 
