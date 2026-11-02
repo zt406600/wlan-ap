@@ -44,6 +44,18 @@ define KernelPackage/qca-nss-ppe
 		+kmod-nat46-qca
   FILES:=$(PKG_BUILD_DIR)/drv/ppe_drv/qca-nss-ppe.ko
   AUTOLOAD:=$(call AutoLoad,31,qca-nss-ppe)
+  # ER2: load the PPE core driver with flow_deacclr_dis=1, i.e. keep an
+  # accelerated flow in the hardware when a packet hits a deacceleration
+  # exception (see ppe_drv.c "Disable Flow deacceleration & Flush on
+  # Exception") and punt only that packet to the host.  Without it PPE flushes
+  # and frees the flow on every such packet and ECM re-accelerates it again,
+  # which on ER2 turned into a create/flush loop of ~830 pairs/s for IPv6
+  # traffic (1.54M v6_create_req == 1.54M v6_flush_req) and left the affected
+  # IPv6 flows permanently on the slow path.  The IPv6 traffic responsible is
+  # the fragmented peer->LAN traffic of the P2P/VPN flows (see the ER2
+  # profile note in profiles/jdcloud_er2.yml).  Gated on the board symbol
+  # because deacceleration is wanted on boards which rely on it.
+  MODPARAMS.qca-nss-ppe:=$(if $(CONFIG_TARGET_ipq53xx_generic_DEVICE_jdcloud_er2),flow_deacclr_dis=1)
 endef
 
 define KernelPackage/qca-nss-ppe/Description

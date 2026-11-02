@@ -113,6 +113,15 @@ diffconfig: |
   # qdisc_unsupported), which is the case for the NSS-DP ports as they come up
   # with the default fq_codel.  Without it PPE acceleration works out of the box.
   # CONFIG_PACKAGE_kmod-qca-nss-ppe-qdisc is not set
+  # PPE flow deacceleration/flush on exception is disabled for this board from
+  # the driver package (MODPARAMS.qca-nss-ppe in qca-nss-ppe/Makefile): the
+  # peer->LAN IPv6 traffic of the P2P/VPN flows arrives fragmented, and IPV6_FRAG
+  # (cpu code 31) is a DEACCEL_EN exception, so every fragment used to flush the
+  # corresponding accelerated flow and ECM re-accelerated it again (1.54M
+  # v6_create_req vs 1.54M v6_flush_req).  Measured with the per-CPU-code
+  # exception/flush counters from /sys/kernel/debug/qca-nss-ppe/stats/cc_stats
+  # (those extra counters were debug-only and are not carried in the tree any
+  # more; the flow_deacclr_dis=1 module parameter is what the fix relies on).
 
 
 
