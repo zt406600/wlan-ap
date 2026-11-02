@@ -23,8 +23,8 @@ Usage:
 Requires 984-add-sonic-fullcone-support.patch for the kernel-side
 NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
 ---
- net/netfilter/xt_MASQUERADE.c | 109 ++++++++++++++++++++++++++++++++-
- 1 file changed, 108 insertions(+), 1 deletion(-)
+ net/netfilter/xt_MASQUERADE.c | 101 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 100 insertions(+), 1 deletion(-)
 
 --- a/net/netfilter/xt_MASQUERADE.c
 +++ b/net/netfilter/xt_MASQUERADE.c
@@ -117,7 +117,7 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
  static struct xt_target masquerade_tg_reg[] __read_mostly = {
  	{
  #if IS_ENABLED(CONFIG_IPV6)
-@@ -95,8 +166,34 @@ static struct xt_target masquerade_tg_re
+@@ -95,7 +166,33 @@ static struct xt_target masquerade_tg_re
  		.checkentry	= masquerade_tg_check,
  		.destroy	= masquerade_tg_destroy,
  		.me		= THIS_MODULE,

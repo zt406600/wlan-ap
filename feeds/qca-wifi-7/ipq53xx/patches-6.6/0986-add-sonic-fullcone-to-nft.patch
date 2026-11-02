@@ -176,7 +176,7 @@ LINUX_VERSION_CODE test would not work: key off the macro instead.
  	return ret;
  }
 
-@@ -257,10 +377,12 @@ static void __exit nft_masq_module_exit(
+@@ -257,11 +377,13 @@ static void __exit nft_masq_module_exit(
  	nft_masq_module_exit_ipv6();
  	nft_masq_module_exit_inet();
  	nft_unregister_expr(&nft_masq_ipv4_type);
@@ -189,3 +189,4 @@ LINUX_VERSION_CODE test would not work: key off the macro instead.
 +MODULE_ALIAS_NFT_EXPR("fullcone");
 
  MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Arturo Borrero Gonzalez <arturo@debian.org>");

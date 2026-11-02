@@ -206,9 +206,20 @@ rm -rf feeds/smpackage feeds/smpackage.tmp
 内核侧是本仓库集成的 SONiC fullcone 补丁：`feeds/qca-wifi-7/ipq53xx/patches-6.6/`
 的 `0984`（`nf_nat_core` 的 3-tuple 哈希表，保证源端口映射端点无关）、`0985`
 （`xt_MASQUERADE` 的 `FULLCONE` target，iptables）与 `0986`（`nft_masq` 里的
-`fullcone` 表达式，nftables）；用户侧是 `patches-25.12/0132`–`0136`
+`fullcone` 表达式，nftables）；用户侧是 `patches-25.12/0208`–`0212`
 （libnftnl / nftables / iptables / firewall3 / firewall4）以及
 `feeds-patches/luci/` 里的 LuCI 界面补丁（防火墙页面的全局开关、区域开关与协议多选）。
+
+这三个内核补丁（`0984`–`0986`）跟随上游 [openwrt-sonic-fullcone] 修复到 `e5cbaad`：
+`find_appropriate_dst()` 里 `nf_ct_invert_tuple()` 之后没有复位 `result->dst.dir`，
+入站 fullcone 连接（外网主动连映射端口）的回包会被算错 conntrack 指针而不经过 NAT，
+带着内网源地址发出去（上游 issue #6）。同一提交还修正了 `0984`/`0985` 的 hunk header，
+此前 `git apply` 直接报 `corrupt patch`、GNU patch 需要 fuzz 才能打上。
+`0986` 保留本地版本：上游为 6.12+ 改成两参数的 `validate` 并去掉 `.reduce`，
+本 target 是 6.6，仍用三参数签名和 `#ifdef NFT_REDUCE_READONLY` 的兼容写法，
+只补上了末尾 hunk 的上下文（不再需要 fuzz）。
+
+[openwrt-sonic-fullcone]: https://github.com/mufeng05/openwrt-sonic-fullcone
 
 **不要再装 `kmod-nft-fullcone`**（`smpackage` 里的社区实现，仓库默认配置里已关掉）：
 它和 SONiC 的 `fullcone` 表达式同名，同时存在会互相抢占表达式注册，`nft_masq.ko`
@@ -240,9 +251,17 @@ openwrt 自带的 `target/linux/generic`，而那里只有 6.12 的目录。那�
 的补丁必须排在 `0441-*` 之后）。改完用
 `make target/linux/prepare V=s` 就能最快确认补丁是否真的应用上了。
 
+### patches-25.12 的编号约定
+
+`01xx` 段留给上游（每次同步 upstream main 都会在末尾追加新的打包升级补丁），
+本仓库自己的补丁一律从 `0200` 起，目前是 `0200`–`0212`。以前 ER2 的补丁占着
+`0124`–`0136`，每同步一次就得给上游的新补丁挪号（见 `a5bbf655`）；现在上游的
+`01xx` 与本仓库逐字节一致，同步时不会再产生编号冲突。新补丁直接取 `02xx` 里
+下一个未占用的号。
+
 ### 关于第三方 feed `smpackage`
 
-`patches-25.12/0127-feeds-add-smpackage-feed.patch` 会加一个指向
+`patches-25.12/0203-feeds-add-smpackage-feed.patch` 会加一个指向
 `https://github.com/kenzok8/small-package` 的 `src-git smpackage` feed（**没有锁定 commit**）。
 `.config` 里 `luci-theme-argon`、`autocore-arm`、`kmod-nft-fullcone`（fullcone 的内核模块，
 来自该 feed 的 `fullconenat-nft`）、`luci-app-daede_daed`、`luci-app-ssr-plus_*` 这些符号都来自它，

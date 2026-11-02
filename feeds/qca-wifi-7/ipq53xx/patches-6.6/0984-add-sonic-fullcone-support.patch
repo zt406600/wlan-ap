@@ -25,8 +25,8 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 ---
  include/net/netfilter/nf_conntrack.h  |   3 +
  include/uapi/linux/netfilter/nf_nat.h |   3 +-
- net/netfilter/nf_nat_core.c           | 222 ++++++++++++++++++++---
- 3 files changed, 197 insertions(+), 31 deletions(-)
+ net/netfilter/nf_nat_core.c           | 196 +++++++++++++++++++----
+ 3 files changed, 171 insertions(+), 31 deletions(-)
 
 --- a/include/net/netfilter/nf_conntrack.h
 +++ b/include/net/netfilter/nf_conntrack.h
@@ -69,7 +69,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  static unsigned int nf_nat_htable_size __read_mostly;
  static siphash_aligned_key_t nf_nat_hash_rnd;
 
-@@ -180,5 +181,48 @@ hash_by_src(const struct net *net,
+@@ -180,6 +181,49 @@ hash_by_src(const struct net *net,
  	return reciprocal_scale(hash, nf_nat_htable_size);
  }
 
@@ -118,7 +118,8 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 +
  /**
   * nf_nat_used_tuple - check if proposed nat tuple clashes with existing entry
-@@ -298,6 +337,34 @@ find_appropriate_src(struct net *net,
+  * @tuple: proposed NAT binding
+@@ -298,6 +337,38 @@ find_appropriate_src(struct net *net,
  	return 0;
  }
 
@@ -144,6 +145,10 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 +			nf_ct_invert_tuple(result,
 +					   &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
 +			result->src = tuple->src;
++			/* nf_ct_invert_tuple() set dir to REPLY, but result
++			 * is an original-direction tuple.
++			 */
++			result->dst.dir = IP_CT_DIR_ORIGINAL;
 +			return 1;
 +		}
 +	}
@@ -153,7 +158,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  /* For [FUTURE] fragmentation handling, we want the least-used
   * src-ip/dst-ip/proto triple.  Fairness doesn't come into it.  Thus
   * if the range specifies 1.2.3.4 ports 10000-10005 and 1.2.3.5 ports
-@@ -377,10 +443,10 @@ find_best_ips_proto(const struct nf_conntrack_zone *zone,
+@@ -377,10 +447,10 @@ find_best_ips_proto(const struct nf_conntrack_zone *zone,
   *
   * Per-protocol part of tuple is initialized to the incoming packet.
   */
@@ -168,7 +173,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  {
  	unsigned int range_size, min, max, i, attempts;
  	__be16 *keyptr;
-@@ -406,7 +472,7 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -406,7 +476,7 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
  		/* If there is no master conntrack we are not PPTP,
  		   do not change tuples */
  		if (!ct->master)
@@ -177,7 +182,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 
  		if (maniptype == NF_NAT_MANIP_SRC)
  			keyptr = &tuple->src.u.gre.key;
-@@ -434,14 +500,14 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -434,14 +504,14 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
 
  		break;
  	default:
@@ -194,7 +199,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 
  		if (ntohs(*keyptr) < 1024) {
  			/* Loose convention: >> 512 is credential passing */
-@@ -483,12 +549,19 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -483,12 +553,19 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
  another_round:
  	for (i = 0; i < attempts; i++, off++) {
  		*keyptr = htons(min + off % range_size);
@@ -217,7 +222,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  	attempts /= 2;
  	off = get_random_u16();
  	goto another_round;
-@@ -497,10 +569,15 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -497,10 +573,15 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
  /* Manipulate the tuple into the range given. For NF_INET_POST_ROUTING,
   * we change the source to map into the range. For NF_INET_PRE_ROUTING
   * and NF_INET_LOCAL_OUT, we change the destination to map into the
@@ -236,7 +241,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  get_unique_tuple(struct nf_conntrack_tuple *tuple,
  		 const struct nf_conntrack_tuple *orig_tuple,
  		 const struct nf_nat_range2 *range,
-@@ -508,8 +585,11 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -508,8 +589,11 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
  		 enum nf_nat_manip_type maniptype)
  {
  	const struct nf_conntrack_zone *zone;
@@ -248,7 +253,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  	zone = nf_ct_zone(ct);
 
  	/* 1) If this srcip/proto/src-proto-part is currently mapped,
-@@ -521,46 +601,75 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
+@@ -521,46 +605,75 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
  	 * manips not an issue.
  	 */
  	if (maniptype == NF_NAT_MANIP_SRC &&
@@ -340,7 +345,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  }
 
  struct nf_conn_nat *nf_ct_nat_ext_add(struct nf_conn *ct)
-@@ -602,7 +714,9 @@ nf_nat_setup_info(struct nf_conn *ct,
+@@ -602,7 +718,9 @@ nf_nat_setup_info(struct nf_conn *ct,
  	nf_ct_invert_tuple(&curr_tuple,
  			   &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
 
@@ -351,7 +356,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 
  	if (!nf_ct_tuple_equal(&new_tuple, &curr_tuple)) {
  		struct nf_conntrack_tuple reply;
-@@ -624,12 +738,16 @@ nf_nat_setup_info(struct nf_conn *ct,
+@@ -624,12 +742,16 @@ nf_nat_setup_info(struct nf_conn *ct,
 
  	if (maniptype == NF_NAT_MANIP_SRC) {
  		unsigned int srchash;
@@ -368,7 +373,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  		hlist_add_head_rcu(&ct->nat_bysource,
  				   &nf_nat_bysource[srchash]);
  		spin_unlock_bh(lock);
-@@ -808,6 +926,7 @@ static void nf_nat_cleanup_conntrack(struct nf_conn *ct)
+@@ -808,6 +930,7 @@ static void nf_nat_cleanup_conntrack(struct nf_conn *ct)
  	h = hash_by_src(nf_ct_net(ct), nf_ct_zone(ct), &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
  	spin_lock_bh(&nf_nat_locks[h % CONNTRACK_LOCKS]);
  	hlist_del_rcu(&ct->nat_bysource);
@@ -376,7 +381,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  	spin_unlock_bh(&nf_nat_locks[h % CONNTRACK_LOCKS]);
  }
 
-@@ -1138,12 +1257,19 @@ static int __init nf_nat_init(void)
+@@ -1138,12 +1261,19 @@ static int __init nf_nat_init(void)
  	if (!nf_nat_bysource)
  		return -ENOMEM;
 
@@ -396,18 +401,13 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  		return ret;
  	}
 
-@@ -1159,6 +1283,7 @@ static int __init nf_nat_init(void)
- 		synchronize_net();
+@@ -1160,4 +1288,5 @@ static int __init nf_nat_init(void)
  		unregister_pernet_subsys(&nat_net_ops);
  		kvfree(nf_nat_bysource);
 +		kvfree(nf_nat_by_manip_src);
  	}
 
- 	return ret;
-@@ -1175,6 +1300,7 @@ static void __exit nf_nat_cleanup(void)
-
- 	synchronize_net();
+@@ -1177,2 +1306,3 @@ static void __exit nf_nat_cleanup(void)
  	kvfree(nf_nat_bysource);
 +	kvfree(nf_nat_by_manip_src);
  	unregister_pernet_subsys(&nat_net_ops);
- }
