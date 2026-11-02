@@ -114,7 +114,7 @@ make -j$(nproc) V=s
 `defconfig/jdc-er2.config` 是一份可直接使用的 `.config`，其中包含（挑重点）：
 
 - **完整 LuCI 网页界面**：`luci`、`luci-ssl`、`luci-mod-admin-full`、`luci-mod-{network,status,system}`、
-  `luci-app-firewall`、`luci-app-package-manager`、`luci-app-upnp`、`luci-app-nss-overview`、
+  `luci-app-firewall`、`luci-app-package-manager`、`luci-app-upnp`、
   `luci-proto-{ppp,ipv6,relay}`、`luci-theme-argon` + `luci-theme-bootstrap`、简体中文语言包；
 - **QCA 硬件加速**：`kmod-qca-nss-dp-qca`、`kmod-qca-nss-phy`、`kmod-qca-nss-ppe`
   (+`-bridge-mgr`/`-vlan-mgr`/`-netlink`/`-pppoe-mgr`/`-ds`/`-rule`/`-vp`)、`kmod-qca-nss-sfe`、
