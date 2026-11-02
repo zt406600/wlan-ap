@@ -201,6 +201,36 @@ export http_proxy=http://127.0.0.1:7890 https_proxy=http://127.0.0.1:7890
 它每天自动更新，2026-10 就因为 `luci-app-homeproxy` 把依赖抬到 `sing-box>=1.15.0_alpha10`
 而把当时的构建打挂过。
 
+### 仓库自带的 `extras` feed（vendored 第三方包）
+
+`patches-25.12/0213-feeds-add-extras-feed.patch` 给 `feeds.conf.default` 加了一行
+`src-link extras ../../feeds/extras`，与已有的 `src-link qca ../../feeds/qca-wifi-7`
+同一套路：**包源码就在本仓库里**，`feeds/` 下按普通 feed 的布局摆（`<包名>/Makefile`）。
+
+目前里面只有一个包：
+
+| 包 | 来源 | 说明 |
+|---|---|---|
+| `luci-theme-argon` | [jerrykuku/luci-theme-argon] `v3.1.2`（`7b77b44`） | 主题；配置界面已整合进主题包，不需要 `luci-app-argon-config` |
+
+用它的理由：argon 上游不是 feed 形态的仓库（`Makefile` 在根目录），官方也没有，而第三方
+大杂烩 feed 又不该引进来（见上一节的教训）。vendored 之后版本写死在仓库里，构建不联网、
+不会某天被上游改依赖打挂。
+
+拉取/安装（正常 feed 流程）：
+
+```bash
+cd openwrt
+./scripts/feeds update extras
+./scripts/feeds install luci-theme-argon
+```
+
+升级做法（换版本时把 `feeds/extras/luci-theme-argon/` 整个替换）和丢弃了哪些上游文件
+（`Screenshots/`、`docs/`、`tests/`、`less/`、`compat/`）都写在
+`feeds/extras/luci-theme-argon/PROVENANCE.md` 里。
+
+[jerrykuku/luci-theme-argon]: https://github.com/jerrykuku/luci-theme-argon
+
 `defconfig/jdc-er2.config` 里还有几个包本仓库不含源码（`luci-app-wolultra`、
 `luci-app-mini-diskmanager`、`luci-theme-aurora`），`make defconfig` 会因找不到对应符号
 自动忽略这几行，不影响编译；需要就把源码放进 `openwrt/package/`（见「增删软件包」）。

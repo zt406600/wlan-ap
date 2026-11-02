@@ -1,0 +1,31 @@
+From b5a1ef27433664cbf5ecef0cc30843b7a41a38bb Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Mon, 2 Nov 2026 23:30:00 +0800
+Subject: [PATCH] feeds: add the vendored extras feed
+
+Add a local `src-link extras ../../feeds/extras` feed next to the existing
+`src-link qca ../../feeds/qca-wifi-7`, so the repository can carry packages that
+have no usable (or no pinned) upstream feed without pulling a third-party feed
+that changes under us - the smpackage removal in 2a421838 is the example.
+
+The feed content itself is vendored under feeds/extras/ (currently
+luci-theme-argon v3.1.2, see feeds/extras/luci-theme-argon/PROVENANCE.md), so the
+version is whatever is committed there and builds stay offline/reproducible.
+
+Signed-off-by: leerep <leerep@163.com>
+---
+ feeds.conf.default | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/feeds.conf.default b/feeds.conf.default
+index 2396270..8e4f24c 100644
+--- a/feeds.conf.default
++++ b/feeds.conf.default
+@@ -3,3 +3,4 @@ src-git luci https://git.openwrt.org/project/luci.git^128a7812f4be233c5dd7f7466f
+ src-git routing https://git.openwrt.org/feed/routing.git^3d7d0dc7fa43d3eb09498417407e95a6552e5312
+ src-git telephony https://git.openwrt.org/feed/telephony.git^2618106d5846a4a542fdf5809f0d3ed228ce439b
+ src-git video https://github.com/openwrt/video.git^094bf58da6682f895255a35a84349a79dab4bf95
++src-link extras ../../feeds/extras
+-- 
+2.43.0
+
