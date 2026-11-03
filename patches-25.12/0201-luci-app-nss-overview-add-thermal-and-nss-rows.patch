@@ -1,26 +1,52 @@
-From 55dd79b2c081e0140f1dad56eab0e49b6ccb3920 Mon Sep 17 00:00:00 2001
+From 8b91cc3fbff51f0f22b310c91d65b5693a1b1338 Mon Sep 17 00:00:00 2001
 From: leerep <leerep@163.com>
 Date: Sun, 20 Sep 2026 14:15:54 +0800
 Subject: [PATCH] luci-app-nss-overview: add thermal and NSS acceleration rows
- to the status overview
+ to the overview
 
-Add a self-contained LuCI add-on package which shows the SoC temperature and the QCA NSS/PPE hardware acceleration counters inside the system table of the "Status -> Overview" page.
+Add a self-contained LuCI add-on package which shows the SoC temperature and the
+QCA NSS/PPE hardware acceleration counters inside the system table of the
+"Status -> Overview" page. It registers no page of its own: the only route it
+exposes is admin/status/nss_status/data (JSON), which 11_nss.js fetches from
+load(); a node without a title does not show up in the menu.
 
-The two rows are added through LuCI's documented extension point: luci-mod-status scans /www/luci-static/resources/view/status/include/ for *.js files, loads them sorted by name and calls load()/render() on each of them from view/status/index.js. 11_nss.js therefore sorts right after 10_system.js (the system table) and patches that table from render().
+The two rows are added through LuCI's documented extension point: luci-mod-status
+scans /www/luci-static/resources/view/status/include/ for *.js files, loads them
+sorted by name and calls load()/render() on each of them from
+view/status/index.js. 11_nss.js therefore sorts right after 10_system.js (the
+system table) and patches that table from render().  Doing the same work from a
+timer or a MutationObserver after render() instead makes the rows disappear and
+reappear on every 5 second poll of the overview page, which shows up as a
+jumping page; load() is part of the same Promise.all, so the table and the two
+extra rows are written to the DOM in one synchronous pass.
 
-The data is collected by the bundled Lua controller from the ECM/PPE debugfs counters and the thermal zones and is fetched from load(), i.e. before index.js renders anything, so the table and the two extra rows are written to the DOM in one synchronous pass. Doing the same work from a timer or a MutationObserver after render() instead makes the rows disappear and reappear on every 5 second poll of the overview page, which shows up as a jumping page.
+The counters are reported per address family: ECM keeps separate front ends for
+IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table has
+separate v4_*/v6_* entries, so the controller reads both families and the front
+end shows the split next to the totals.  The CPU temperature is read from the
+thermal zone the controller recognises as the CPU sensor (a zone whose type
+contains "cpu", falling back to tsens_tz_sensor14 on ipq5332, whose zones
+ipq5332-thermald.dtsi renames) instead of the maximum over all sensors, and is
+labelled as such.
 
-The counters are reported per address family: ECM keeps separate front ends for IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table has separate v4_*/v6_* entries, so the controller reads both families and the front end shows the split next to the totals. The CPU temperature is read from the thermal zone the controller recognises as the CPU sensor (a zone whose type contains "cpu", falling back to tsens_tz_sensor14 on ipq5332, whose zones are renamed by ipq5332-thermald.dtsi) instead of the maximum over all sensors, and is labelled as such.
+Dropped from the first version: the standalone "Status -> NSS overview" page
+(luasrc/view/nss_status/status.htm plus its template() entry) and the
++luci-compat dependency it needed.  The page duplicated the two rows without
+adding anything, and the add-on is now a pure data source for the overview.
 
+Signed-off-by: leerep <leerep@163.com>
 ---
- package/luci-app-nss-overview/Makefile             |  13 ++
- .../resources/view/status/include/11_nss.js        | 259 +++++++++++++++++++++
- .../luasrc/controller/nss_status.lua               | 135 +++++++++++
- .../luasrc/view/nss_status/status.htm              |  95 ++++++++
- 4 files changed, 502 insertions(+)
+ package/luci-app-nss-overview/Makefile        |  13 +
+ .../resources/view/status/include/11_nss.js   | 259 ++++++++++++++++++
+ .../luasrc/controller/nss_status.lua          | 138 ++++++++++
+ 3 files changed, 410 insertions(+)
+ create mode 100644 package/luci-app-nss-overview/Makefile
+ create mode 100644 package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
+ create mode 100644 package/luci-app-nss-overview/luasrc/controller/nss_status.lua
+
 diff --git a/package/luci-app-nss-overview/Makefile b/package/luci-app-nss-overview/Makefile
 new file mode 100644
-index 0000000000..986ff3b51b
+index 0000000..0d5101a
 --- /dev/null
 +++ b/package/luci-app-nss-overview/Makefile
 @@ -0,0 +1,13 @@
@@ -31,7 +57,7 @@ index 0000000000..986ff3b51b
 +PKG_RELEASE:=4
 +
 +LUCI_TITLE:=NSS/PPE acceleration and thermal status in LuCI overview
-+LUCI_DEPENDS:=+luci-mod-status +luci-compat
++LUCI_DEPENDS:=+luci-mod-status
 +LUCI_PKGARCH:=all
 +
 +include $(TOPDIR)/feeds/luci/luci.mk
@@ -39,7 +65,7 @@ index 0000000000..986ff3b51b
 +# call BuildPackage - OpenWrt buildroot signature
 diff --git a/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
 new file mode 100644
-index 0000000000..0b9637713b
+index 0000000..0b96377
 --- /dev/null
 +++ b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
 @@ -0,0 +1,259 @@
@@ -304,11 +330,13 @@ index 0000000000..0b9637713b
 +
 diff --git a/package/luci-app-nss-overview/luasrc/controller/nss_status.lua b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
 new file mode 100644
-index 0000000000..d7a42187b4
+index 0000000..30ddec9
 --- /dev/null
 +++ b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
-@@ -0,0 +1,135 @@
-+-- NSS / PPE 加速状态页面（读取 QCA ECM 与 PPE 的 debugfs 统计）
+@@ -0,0 +1,138 @@
++-- NSS / PPE 加速统计（读取 QCA ECM 与 PPE 的 debugfs 统计）。
++-- 只作为「状态 -> 概览」两行数据的数据源（11_nss.js 调 /admin/status/nss_status/data），
++-- 不再注册独立的页面和菜单项。
 +module("luci.controller.nss_status", package.seeall)
 +
 +-- Lua 5.2+ 里 unpack 变成了 table.unpack，两种运行时都兼容
@@ -439,110 +467,11 @@ index 0000000000..d7a42187b4
 +	luci.http.write_json(collect_stats())
 +end
 +
++-- 只注册数据接口（无 title 的节点不会出现在菜单里），独立的
++-- "状态 -> 加速状态" 页面已移除，数据只给概览页的两行用。
 +function index()
-+	entry({"admin", "status", "nss_status"}, template("nss_status/status"), _("加速状态"), 90).leaf = true
 +	entry({"admin", "status", "nss_status", "data"}, call("action_data")).leaf = true
 +end
-diff --git a/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm b/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm
-new file mode 100644
-index 0000000000..0c2fb441ee
---- /dev/null
-+++ b/package/luci-app-nss-overview/luasrc/view/nss_status/status.htm
-@@ -0,0 +1,95 @@
-+<%
-+local url_data = luci.dispatcher.build_url("admin", "status", "nss_status", "data")
-+-%>
-+
-+<h2 name="content"><%:NSS / PPE 加速状态%></h2>
-+
-+<style>
-+.nss-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-+.nss-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px; text-align: center; }
-+.nss-card .v { font-size: 26px; font-weight: 600; color: #2c6fbb; line-height: 1.3; }
-+.nss-card .k { font-size: 12px; color: #666; margin-top: 4px; }
-+.nss-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-+.nss-item { border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 12px; font-size: 13px; }
-+.nss-item b { color: #2c6fbb; }
-+.temp-hot { color: #d9534f; font-weight: 600; }
-+.temp-ok { color: #27ae60; font-weight: 600; }
-+@media (prefers-color-scheme: dark) {
-+	.nss-card, .nss-item { background: #2c3e50; border-color: #445566; color: #ddd; }
-+	.nss-card .v { color: #6cb2eb; }
-+	.nss-item b { color: #6cb2eb; }
-+}
-+</style>
-+
-+<div class="nss-grid">
-+	<div class="nss-card"><div class="v" id="ppe_accel">-</div><div class="k">PPE 加速连接</div><div class="k" id="ppe_accel_fam">IPv4 - / IPv6 -</div></div>
-+	<div class="nss-card"><div class="v" id="sfe_accel">-</div><div class="k">SFE 加速连接</div><div class="k" id="sfe_accel_fam">IPv4 - / IPv6 -</div></div>
-+	<div class="nss-card"><div class="v" id="conns">-</div><div class="k">ECM 连接总数（v4+v6）</div></div>
-+</div>
-+
-+<div class="nss-row">
-+	<div class="nss-item">PPE L3 流（当前）v4/v6：<b id="ppe_flows">-</b></div>
-+	<div class="nss-item">PPE L2 流（当前）v4/v6：<b id="ppe_l2">-</b></div>
-+	<div class="nss-item">host 添加失败（累计）v4/v6：<b id="host_fail">-</b></div>
-+	<div class="nss-item">流创建失败（累计）v4/v6：<b id="create_fail">-</b></div>
-+</div>
-+
-+<h3><%:温度%></h3>
-+<div class="nss-row" id="temps"></div>
-+
-+<p style="font-size:12px;color:#888;">
-+	<%:数据来源%>：/sys/kernel/debug/ecm、/sys/kernel/debug/qca-nss-ppe、/sys/class/thermal — <span id="ts">-</span>
-+</p>
-+
-+<script type="text/javascript">
-+//<![CDATA[
-+var nssURL = '<%=url_data%>';
-+function nssSet(id, v) {
-+	var e = document.getElementById(id);
-+	if (e) e.textContent = v;
-+}
-+function nssRefresh() {
-+	fetch(nssURL, { credentials: 'same-origin', cache: 'no-store' })
-+		.then(function (r) { return r.json(); })
-+		.then(function (d) {
-+			nssSet('ppe_accel', d.ppe_accel);
-+			nssSet('sfe_accel', d.sfe_accel);
-+			nssSet('conns', d.conns);
-+			/* PPE / SFE 在 ECM 里按协议族分开统计，这里把 v4/v6 明细也显示出来 */
-+			nssSet('ppe_accel_fam', 'IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0));
-+			nssSet('sfe_accel_fam', 'IPv4 ' + (d.sfe_accel_v4 || 0) + ' / IPv6 ' + (d.sfe_accel_v6 || 0));
-+			nssSet('ppe_flows', (d.ppe_flows_v4 || 0) + ' / ' + (d.ppe_flows_v6 || 0));
-+			nssSet('ppe_l2', (d.ppe_l2_v4 || 0) + ' / ' + (d.ppe_l2_v6 || 0));
-+			nssSet('host_fail', (d.host_fail_v4 || 0) + ' / ' + (d.host_fail_v6 || 0));
-+			nssSet('create_fail', (d.create_fail_v4 || 0) + ' / ' + (d.create_fail_v6 || 0));
-+
-+			/* 优先用带类型名的 zones（thermal_zoneN/type），没有就退回纯数值数组 */
-+			var box = document.getElementById('temps');
-+			var zones = d.zones || [];
-+			if (box && (zones.length || (d.temps && d.temps.length))) {
-+				var html = '';
-+				if (zones.length) {
-+					for (var i = 0; i < zones.length; i++) {
-+						var z = zones[i];
-+						var cls = z.temp >= 80 ? 'temp-hot' : 'temp-ok';
-+						html += '<div class="nss-item">' + (z.name || ('sensor' + i)) + '：<span class="' + cls + '">' + z.temp + ' °C</span></div>';
-+					}
-+				}
-+				else {
-+					for (var j = 0; j < d.temps.length; j++) {
-+						var tj = d.temps[j];
-+						var clsj = tj >= 80 ? 'temp-hot' : 'temp-ok';
-+						html += '<div class="nss-item">sensor' + j + '：<span class="' + clsj + '">' + tj + ' °C</span></div>';
-+					}
-+				}
-+				box.innerHTML = html;
-+			}
-+			var ts = document.getElementById('ts');
-+			if (ts) ts.textContent = new Date().toLocaleTimeString();
-+		})
-+		.catch(function () {});
-+}
-+nssRefresh();
-+setInterval(nssRefresh, 3000);
-+//]]>
-+</script>
 -- 
-2.34.1
+2.43.0
+
