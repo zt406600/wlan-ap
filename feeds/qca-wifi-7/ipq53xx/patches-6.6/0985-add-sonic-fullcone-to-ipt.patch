@@ -22,9 +22,14 @@ Usage:
 
 Requires 984-add-sonic-fullcone-support.patch for the kernel-side
 NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
+
+The module aliases ipt_FULLCONE and ip6t_FULLCONE let iptables load
+xt_MASQUERADE.ko on demand for the new target. The IPv4 target shares
+masquerade_tg_check(), which also rejects an address range the target
+would ignore.
 ---
- net/netfilter/xt_MASQUERADE.c | 101 ++++++++++++++++++++++++++++++++-
- 1 file changed, 100 insertions(+), 1 deletion(-)
+ net/netfilter/xt_MASQUERADE.c | 92 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 91 insertions(+), 1 deletion(-)
 
 --- a/net/netfilter/xt_MASQUERADE.c
 +++ b/net/netfilter/xt_MASQUERADE.c
@@ -39,7 +44,7 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
 
  MODULE_LICENSE("GPL");
  MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
-@@ -72,6 +74,77 @@ static int masquerade_tg6_checkentry(con
+@@ -72,6 +74,66 @@ static int masquerade_tg6_checkentry(con
  }
  #endif
 
@@ -75,17 +80,6 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
 +	return nf_nat_setup_info(ct, &range, NF_NAT_MANIP_DST);
 +}
 +
-+static int fullcone_tg_check(const struct xt_tgchk_param *par)
-+{
-+	const struct nf_nat_ipv4_multi_range_compat *mr = par->targinfo;
-+
-+	if (mr->rangesize != 1) {
-+		pr_debug("bad rangesize %u\n", mr->rangesize);
-+		return -EINVAL;
-+	}
-+	return nf_ct_netns_get(par->net, par->family);
-+}
-+
 +#if IS_ENABLED(CONFIG_IPV6)
 +static unsigned int
 +fullcone_tg6(struct sk_buff *skb, const struct xt_action_param *par)
@@ -117,7 +111,7 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
  static struct xt_target masquerade_tg_reg[] __read_mostly = {
  	{
  #if IS_ENABLED(CONFIG_IPV6)
-@@ -95,7 +166,33 @@ static struct xt_target masquerade_tg_re
+@@ -95,7 +157,33 @@ static struct xt_target masquerade_tg_re
  		.checkentry	= masquerade_tg_check,
  		.destroy	= masquerade_tg_destroy,
  		.me		= THIS_MODULE,
@@ -131,7 +125,7 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
 +		.table		= "nat",
 +		.hooks		= (1 << NF_INET_PRE_ROUTING) |
 +				  (1 << NF_INET_POST_ROUTING),
-+		.checkentry	= fullcone_tg_check,
++		.checkentry	= masquerade_tg_check,
 +		.destroy	= masquerade_tg_destroy,
 +		.me		= THIS_MODULE,
 +	},
@@ -152,3 +146,11 @@ NF_NAT_RANGE_FULLCONE flag and 3-tuple hash table.
  };
 
  static int __init masquerade_tg_init(void)
+@@ -127,5 +215,7 @@ module_init(masquerade_tg_init);
+ module_exit(masquerade_tg_exit);
+ #if IS_ENABLED(CONFIG_IPV6)
+ MODULE_ALIAS("ip6t_MASQUERADE");
++MODULE_ALIAS("ip6t_FULLCONE");
+ #endif
+ MODULE_ALIAS("ipt_MASQUERADE");
++MODULE_ALIAS("ipt_FULLCONE");

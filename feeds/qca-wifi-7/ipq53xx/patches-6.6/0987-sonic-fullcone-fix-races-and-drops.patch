@@ -1,0 +1,310 @@
+From: openwrt-sonic-fullcone contributors
+Date: Mon, 3 Nov 2026 00:00:00 +0000
+Subject: [PATCH] netfilter: nf_nat: fix races and dropped packets in SONiC
+ fullcone NAT
+
+Fixes on top of 984, the SONiC fullcone NAT patch with the fixes
+submitted to SONiC. They are not part of the SONiC patch and have not
+been submitted there; without this file, 984 builds as it is.
+
+- find_appropriate_dst() walked nf_nat_by_manip_src under RCU only.
+  Conntracks are SLAB_TYPESAFE_BY_RCU, so an entry could be freed and
+  reused while its tuple was copied, and the packet DNATed to the wrong
+  host. Walk the table, and check 3-tuples, under the bucket lock.
+- The port search checked the 3-tuple without a lock and the entry was
+  added later, so two internal endpoints could take the same translated
+  source. The first packets of one internal endpoint, set up on two CPUs
+  at once, could also get two translated sources. Check the 3-tuple
+  again under the bucket lock and add the entry in the same critical
+  section, and set up the fullcone bindings of one internal endpoint one
+  at a time.
+- Without a port range, fullcone only checked 5-tuple uniqueness, so two
+  internal endpoints could share a translated source. fw3 generates its
+  UDP-Lite rule without one, since iptables takes no port range for
+  UDP-Lite, and hand-written rules can leave it out. Check the 3-tuple
+  in that case as well.
+- nf_nat_l4proto_unique_tuple() returned 0, which drops the packet, also
+  where upstream keeps the tuple: protocols without ports when the rule
+  asks for random ports, DNAT without a port range, and an ordinary
+  binding whose port search runs out. Only a fullcone binding without a
+  free 3-tuple is dropped now.
+---
+ net/netfilter/nf_nat_core.c | 148 ++++++++++++++++++++++++++++++++------
+ 1 file changed, 126 insertions(+), 22 deletions(-)
+
+--- a/net/netfilter/nf_nat_core.c
++++ b/net/netfilter/nf_nat_core.c
+@@ -42,6 +42,12 @@ static struct hlist_head *nf_nat_by_mani
+  * cover them.
+  */
+ static spinlock_t nf_nat_manip_src_locks[CONNTRACK_LOCKS];
++/* Serializes the fullcone SNAT setup of one internal endpoint. */
++static spinlock_t nf_nat_fullcone_locks[CONNTRACK_LOCKS];
++/* Port searches for a fullcone binding whose translated source was taken
++ * by another binding before it could add its own.
++ */
++#define NF_NAT_FULLCONE_RETRIES	8
+ static unsigned int nf_nat_htable_size __read_mostly;
+ static siphash_aligned_key_t nf_nat_hash_rnd;
+ 
+@@ -205,8 +211,10 @@ nf_nat_used_3_tuple(const struct nf_conn
+ {
+ 	const struct nf_conn *ct;
+ 	const struct nf_conntrack_zone *zone;
++	struct nf_conntrack_tuple reply;
+ 	unsigned int h;
+ 	struct net *net = nf_ct_net(ignored_conntrack);
++	int used = 0;
+ 
+ 	/* 3-tuple uniqueness is required for translated source only */
+ 	if (maniptype != NF_NAT_MANIP_SRC)
+@@ -216,16 +224,19 @@ nf_nat_used_3_tuple(const struct nf_conn
+ 
+ 	/* The tuple passed here is the inverted reply (with translated source) */
+ 	h = hash_by_src(net, zone, tuple);
+-	hlist_for_each_entry_rcu(ct, &nf_nat_by_manip_src[h], nat_by_manip_src) {
+-		struct nf_conntrack_tuple reply;
+-		nf_ct_invert_tuple(&reply, tuple);
++	nf_ct_invert_tuple(&reply, tuple);
++	spin_lock_bh(&nf_nat_manip_src_locks[h % CONNTRACK_LOCKS]);
++	hlist_for_each_entry(ct, &nf_nat_by_manip_src[h], nat_by_manip_src) {
+ 		/* Compare against the destination in the reply */
+ 		if (same_reply_dst(ct, &reply) &&
+ 		    net_eq(net, nf_ct_net(ct)) &&
+-		    nf_ct_zone_equal(ct, zone, IP_CT_DIR_ORIGINAL))
+-			return 1;
++		    nf_ct_zone_equal(ct, zone, IP_CT_DIR_ORIGINAL)) {
++			used = 1;
++			break;
++		}
+ 	}
+-	return 0;
++	spin_unlock_bh(&nf_nat_manip_src_locks[h % CONNTRACK_LOCKS]);
++	return used;
+ }
+ 
+ /**
+@@ -510,6 +521,35 @@ same_src(const struct nf_conn *ct,
+ 		t->src.u.all == tuple->src.u.all);
+ }
+ 
++/* Is the translated source of tuple taken, for a fullcone binding of ct?
++ * It is not when the same internal endpoint already maps to it: ct joins
++ * that mapping, as find_appropriate_src() has it do. Otherwise any other
++ * binding takes it, as in nf_nat_used_3_tuple().
++ * Caller holds the nf_nat_manip_src_locks lock of bucket h.
++ */
++static bool
++nf_nat_3_tuple_taken(const struct nf_conntrack_tuple *tuple,
++		     const struct nf_conn *ct, unsigned int h)
++{
++	const struct nf_conntrack_zone *zone = nf_ct_zone(ct);
++	struct net *net = nf_ct_net(ct);
++	struct nf_conntrack_tuple reply;
++	const struct nf_conn *other;
++	bool taken = false;
++
++	nf_ct_invert_tuple(&reply, tuple);
++	hlist_for_each_entry(other, &nf_nat_by_manip_src[h], nat_by_manip_src) {
++		if (!same_reply_dst(other, &reply) ||
++		    !net_eq(net, nf_ct_net(other)) ||
++		    !nf_ct_zone_equal(other, zone, IP_CT_DIR_ORIGINAL))
++			continue;
++		if (same_src(other, &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple))
++			return false;
++		taken = true;
++	}
++	return taken;
++}
++
+ /* Only called for SRC manip */
+ static int
+ find_appropriate_src(struct net *net,
+@@ -547,11 +587,17 @@ find_appropriate_dst(struct net *net,
+ 	struct nf_conntrack_tuple reply;
+ 	unsigned int h;
+ 	const struct nf_conn *ct;
++	int found = 0;
+ 
+ 	nf_ct_invert_tuple(&reply, tuple);
+ 	h = hash_by_src(net, zone, &reply);
+ 
+-	hlist_for_each_entry_rcu(ct, &nf_nat_by_manip_src[h], nat_by_manip_src) {
++	/* Conntracks are SLAB_TYPESAFE_BY_RCU: without the bucket lock an
++	 * entry could be freed and reused while its tuple is copied, and
++	 * the packet sent to some other host.
++	 */
++	spin_lock_bh(&nf_nat_manip_src_locks[h % CONNTRACK_LOCKS]);
++	hlist_for_each_entry(ct, &nf_nat_by_manip_src[h], nat_by_manip_src) {
+ 		if (same_reply_dst(ct, tuple) &&
+ 		    net_eq(net, nf_ct_net(ct)) &&
+ 		    nf_ct_zone_equal(ct, zone, IP_CT_DIR_REPLY)) {
+@@ -563,10 +609,12 @@ find_appropriate_dst(struct net *net,
+ 			 * is an original-direction tuple.
+ 			 */
+ 			result->dst.dir = IP_CT_DIR_ORIGINAL;
+-			return 1;
++			found = 1;
++			break;
+ 		}
+ 	}
+-	return 0;
++	spin_unlock_bh(&nf_nat_manip_src_locks[h % CONNTRACK_LOCKS]);
++	return found;
+ }
+ 
+ /* For [FUTURE] fragmentation handling, we want the least-used
+@@ -703,14 +751,14 @@ static int nf_nat_l4proto_unique_tuple(s
+ 
+ 		break;
+ 	default:
+-		return 0;
++		return 1;
+ 	}
+ 
+ 	/* If no range specified... */
+ 	if (!(range->flags & NF_NAT_RANGE_PROTO_SPECIFIED)) {
+ 		/* If it's dst rewrite, can't change port */
+ 		if (maniptype == NF_NAT_MANIP_DST)
+-			return 0;
++			return 1;
+ 
+ 		if (ntohs(*keyptr) < 1024) {
+ 			/* Loose convention: >> 512 is credential passing */
+@@ -766,8 +814,13 @@ another_round:
+ 		}
+ 	}
+ 
++	/* Only a fullcone binding needs a 3-tuple of its own. Otherwise keep
++	 * the last tuple, as upstream does, and let __nf_conntrack_confirm
++	 * deal with a clash.
++	 */
+ 	if (attempts >= range_size || attempts < 16)
+-		return 0;
++		return !((range->flags & NF_NAT_RANGE_FULLCONE) &&
++			 maniptype == NF_NAT_MANIP_SRC);
+ 	attempts /= 2;
+ 	off = get_random_u16();
+ 	goto another_round;
+@@ -868,7 +921,9 @@ get_unique_tuple(struct nf_conntrack_tup
+ 						goto out;
+ 				}
+ 			}
+-		} else if (!nf_nat_used_tuple(tuple, ct)) {
++		} else if (!nf_nat_used_tuple(tuple, ct) &&
++			   !((nat_range.flags & NF_NAT_RANGE_FULLCONE) &&
++			     nf_nat_used_3_tuple(tuple, ct, maniptype))) {
+ 			goto out;
+ 		}
+ 	}
+@@ -899,6 +954,11 @@ nf_nat_setup_info(struct nf_conn *ct,
+ {
+ 	struct net *net = nf_ct_net(ct);
+ 	struct nf_conntrack_tuple curr_tuple, new_tuple;
++	bool fullcone = maniptype == NF_NAT_MANIP_SRC &&
++			(range->flags & NF_NAT_RANGE_FULLCONE);
++	spinlock_t *fullcone_lock = NULL, *manip_src_lock = NULL;
++	unsigned int manip_src_hash = 0, retries = 0, ret;
++	struct nf_nat_range2 retry_range;
+ 
+ 	/* Can't setup nat info for confirmed ct. */
+ 	if (nf_ct_is_confirmed(ct))
+@@ -918,8 +978,47 @@ nf_nat_setup_info(struct nf_conn *ct,
+ 	nf_ct_invert_tuple(&curr_tuple,
+ 			   &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
+ 
++	/* Set up the fullcone bindings of one internal endpoint one at a
++	 * time, so the second one finds the mapping of the first instead of
++	 * taking a second translated source.
++	 */
++	if (fullcone) {
++		unsigned int h = hash_by_src(net, nf_ct_zone(ct), &curr_tuple);
++
++		fullcone_lock = &nf_nat_fullcone_locks[h % CONNTRACK_LOCKS];
++		spin_lock_bh(fullcone_lock);
++	}
++
++again:
+ 	if (!get_unique_tuple(&new_tuple, &curr_tuple, range, ct, maniptype)) {
+-		return NF_DROP;
++		ret = NF_DROP;
++		goto out;
++	}
++
++	if (maniptype == NF_NAT_MANIP_SRC) {
++		manip_src_hash = hash_by_src(net, nf_ct_zone(ct), &new_tuple);
++		manip_src_lock = &nf_nat_manip_src_locks[manip_src_hash % CONNTRACK_LOCKS];
++		spin_lock_bh(manip_src_lock);
++
++		/* The port search checked the 3-tuple without holding its
++		 * bucket lock. Check it again and add the entry in the same
++		 * critical section, or two fullcone bindings racing for one
++		 * translated source could both take it.
++		 */
++		if (fullcone &&
++		    nf_nat_3_tuple_taken(&new_tuple, ct, manip_src_hash)) {
++			spin_unlock_bh(manip_src_lock);
++			if (++retries == NF_NAT_FULLCONE_RETRIES) {
++				ret = NF_DROP;
++				goto out;
++			}
++			if (range != &retry_range) {
++				retry_range = *range;
++				retry_range.flags |= NF_NAT_RANGE_PROTO_RANDOM_FULLY;
++				range = &retry_range;
++			}
++			goto again;
++		}
+ 	}
+ 
+ 	if (!nf_ct_tuple_equal(&new_tuple, &curr_tuple)) {
+@@ -936,21 +1035,21 @@ nf_nat_setup_info(struct nf_conn *ct,
+ 			ct->status |= IPS_DST_NAT;
+ 
+ 		if (nfct_help(ct) && !nfct_seqadj(ct))
+-			if (!nfct_seqadj_ext_add(ct))
+-				return NF_DROP;
++			if (!nfct_seqadj_ext_add(ct)) {
++				if (manip_src_lock)
++					spin_unlock_bh(manip_src_lock);
++				ret = NF_DROP;
++				goto out;
++			}
+ 	}
+ 
+ 	if (maniptype == NF_NAT_MANIP_SRC) {
+ 		unsigned int srchash;
+-		unsigned int manip_src_hash;
+ 		spinlock_t *lock;
+ 
+-		manip_src_hash = hash_by_src(net, nf_ct_zone(ct), &new_tuple);
+-		lock = &nf_nat_manip_src_locks[manip_src_hash % CONNTRACK_LOCKS];
+-		spin_lock_bh(lock);
+ 		hlist_add_head_rcu(&ct->nat_by_manip_src,
+ 				   &nf_nat_by_manip_src[manip_src_hash]);
+-		spin_unlock_bh(lock);
++		spin_unlock_bh(manip_src_lock);
+ 
+ 		srchash = hash_by_src(net, nf_ct_zone(ct),
+ 				      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
+@@ -967,7 +1066,11 @@ nf_nat_setup_info(struct nf_conn *ct,
+ 	else
+ 		ct->status |= IPS_SRC_NAT_DONE;
+ 
+-	return NF_ACCEPT;
++	ret = NF_ACCEPT;
++out:
++	if (fullcone_lock)
++		spin_unlock_bh(fullcone_lock);
++	return ret;
+ }
+ EXPORT_SYMBOL(nf_nat_setup_info);
+ 
+@@ -1504,6 +1607,7 @@ static int __init nf_nat_init(void)
+ 	for (i = 0; i < CONNTRACK_LOCKS; i++) {
+ 		spin_lock_init(&nf_nat_locks[i]);
+ 		spin_lock_init(&nf_nat_manip_src_locks[i]);
++		spin_lock_init(&nf_nat_fullcone_locks[i]);
+ 	}
+ 
+ 	ret = register_pernet_subsys(&nat_net_ops);

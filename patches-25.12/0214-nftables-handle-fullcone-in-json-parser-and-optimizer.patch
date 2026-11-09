@@ -1,0 +1,98 @@
+From 8c2d5f0b7a1e4b9b8c6d5a4f3e2d1c0b9a8f7e6d Mon Sep 17 00:00:00 2001
+From: leerep <leerep@163.com>
+Date: Tue, 10 Nov 2026 00:00:00 +0800
+Subject: [PATCH] nftables: handle fullcone in the json parser and the optimizer
+
+Synced with openwrt-sonic-fullcone f87ac2a (325c087).  The fullcone statement
+was only wired into the scanner and the netlink path, so a ruleset that
+carries one and is read back as JSON (nft -j) or printed with the optimiser
+enabled (nft -o) dereferenced a NULL expression: the JSON parser allocated a
+fullcone expression without its attributes, and ruleset optimisation did not
+know how to clone the statement.
+
+Depends on the libnftnl/nftables fullcone expression patches.
+
+Signed-off-by: leerep <leerep@163.com>
+
+---
+ 003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch | 72 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+ create mode 100644 package/network/utils/nftables/patches/003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch
+
+diff --git a/package/network/utils/nftables/patches/003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch b/package/network/utils/nftables/patches/003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch
+new file mode 100644
+--- /dev/null
++++ b/package/network/utils/nftables/patches/003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch
+@@ -0,0 +1,72 @@
++From: mufeng05 <gjilkiop@qq.com>
++Date: Mon, 3 Nov 2026 12:00:00 +0800
++Subject: [PATCH] nftables: handle fullcone in the JSON parser and the optimizer
++
++The fullcone patch adds NFT_NAT_FULLCONE between NFT_NAT_MASQ and
++NFT_NAT_REDIR, but three places that switch on or index by the NAT type
++were not updated:
++
++- nat_type_parse() in the JSON parser looks the type up in a table
++  indexed by it. The table now has a NULL entry at the fullcone index,
++  and strcmp() on it crashes nft whenever JSON input has a redirect
++  statement. JSON input also does not accept "fullcone", although
++  nft -j prints it.
++- __stmt_type_eq() in the optimizer has no case for it and hits
++  assert(0) when nft -o compares two fullcone statements.
++- stmt_name() has no case for it either.
++
++Add fullcone to all three. The optimizer never merges rules on a
++fullcone statement: merge_nat() has no fullcone form and would turn the
++port range into an address map.
++
++Signed-off-by: mufeng05 <gjilkiop@qq.com>
++---
++ src/evaluate.c    | 2 ++
++ src/optimize.c    | 6 ++++++
++ src/parser_json.c | 2 ++
++ 3 files changed, 10 insertions(+)
++
++--- a/src/evaluate.c
+++++ b/src/evaluate.c
++@@ -87,6 +87,8 @@ const char *stmt_name(const struct stmt *stmt)
++ 			return "redirect";
++ 		case NFT_NAT_MASQ:
++ 			return "masquerade";
+++		case NFT_NAT_FULLCONE:
+++			return "fullcone";
++ 		}
++ 		break;
++ 	default:
++--- a/src/optimize.c
+++++ b/src/optimize.c
++@@ -300,6 +300,12 @@ static bool __stmt_type_eq(const struct stmt *stmt_a, const struct stmt *stmt_b,
++ 			break;
++ 		case NFT_NAT_MASQ:
++ 			break;
+++		case NFT_NAT_FULLCONE:
+++			/* Track fullcone like the other statements, but never
+++			 * merge rules on it: merge_nat() has no fullcone form
+++			 * and would turn the port range into an address map.
+++			 */
+++			return !fully_compare;
++ 		case NFT_NAT_REDIR:
++ 			if ((stmt_a->nat.proto &&
++ 			     stmt_a->nat.proto->etype != EXPR_SYMBOL &&
++--- a/src/parser_json.c
+++++ b/src/parser_json.c
++@@ -2296,6 +2296,7 @@ static int nat_type_parse(const char *type)
++ 		[NFT_NAT_SNAT]	= "snat",
++ 		[NFT_NAT_DNAT]	= "dnat",
++ 		[NFT_NAT_MASQ]	= "masquerade",
+++		[NFT_NAT_FULLCONE] = "fullcone",
++ 		[NFT_NAT_REDIR]	= "redirect",
++ 	};
++ 	size_t i;
++@@ -2913,6 +2914,7 @@ static struct stmt *json_parse_stmt(struct json_ctx *ctx, json_t *root)
++ 		{ "snat", json_parse_nat_stmt },
++ 		{ "dnat", json_parse_nat_stmt },
++ 		{ "masquerade", json_parse_nat_stmt },
+++		{ "fullcone", json_parse_nat_stmt },
++ 		{ "redirect", json_parse_nat_stmt },
++ 		{ "reject", json_parse_reject_stmt },
++ 		{ "set", json_parse_set_stmt },
