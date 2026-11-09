@@ -21,19 +21,18 @@ jumping page; load() is part of the same Promise.all, so the table and the two
 extra rows are written to the DOM in one synchronous pass.
 
 The counters are reported per address family: ECM keeps separate front ends for
-IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table keeps
-separate v4_*/v6_* counters, so the controller reads both families.  The
-acceleration row reports, per family, both the accelerated connections and the
-flow table entries in use:
+IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}), so both families are shown
+together with their sum:
 
-	PPE连接: IPv4 9 / IPv6 0  PPE流表: IPv4 18/2048, IPv6 0/2048  ECM连接总数: 14
+	PPE加速:9(IPv4 9 / IPv6 0);SFE连接 0(IPv4 0 / IPv6 0) ECM连接总数:14
 
-Each accelerated connection occupies one flow table entry per direction, so the
-single number the first version printed ("PPE: 9") read like table usage while
-it was a connection count, and it hid the IPv6 split.  The table is what fills
-up: IPv4 stops at 2048 entries, i.e. about 1024 accelerated connections, and the
-IPv6 5-tuple table holds 2048 entries as well.  SFE is only appended when it is
-non-zero, because this board forwards through the PPE front end.
+The PPE/SFE figures are accelerated connection counts, not PPE flow table
+entries: each accelerated connection occupies a flow entry in either direction
+(18 entries for the 9 connections above), the IPv4 table holds 2048 entries,
+i.e. about 1024 connections, and IPv6 has its own 5-tuple table of the same
+size (SSDK IN_FLOW_IPV6_5TUPLE_TBL_MAX_ENTRY).  ECM连接总数 comes from ecm_db
+and also counts connections that are not accelerated yet, so it is a different
+metric.
 
 The CPU temperature is read from the thermal zone the controller recognises as
 the CPU sensor (a zone whose type contains "cpu", falling back to
@@ -48,9 +47,9 @@ adding anything, and the add-on is now a pure data source for the overview.
 Signed-off-by: leerep <leerep@163.com>
 ---
  package/luci-app-nss-overview/Makefile | 13 +++++++++++++
- package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js | 268 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js | 254 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  package/luci-app-nss-overview/luasrc/controller/nss_status.lua | 138 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 419 insertions(+)
+ 3 files changed, 405 insertions(+)
  create mode 100644 package/luci-app-nss-overview/Makefile
  create mode 100644 package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
  create mode 100644 package/luci-app-nss-overview/luasrc/controller/nss_status.lua
@@ -78,7 +77,7 @@ diff --git a/package/luci-app-nss-overview/htdocs/luci-static/resources/view/sta
 new file mode 100644
 --- /dev/null
 +++ b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,254 @@
 +'use strict';
 +'require baseclass';
 +
@@ -209,20 +208,6 @@ new file mode 100644
 +}
 +
 +
-+/*
-+ * 有分族明细时补上「 (IPv4：a，IPv6：b)」。PPE 与 SFE 在 ECM 里都是按协议族
-+ * 分开统计的（ecm_ppe_ipv4/ipv6、ecm_sfe_ipv4/ipv6），加速连接总数即两族之和；
-+ * controller 还是旧版（响应里没有分族字段）时不显示括号，退化为只显示总数。
-+ */
-+function familySuffix(d, key) {
-+	var v4 = d[key + '_v4'],
-+	    v6 = d[key + '_v6'];
-+
-+	if (v4 == null && v6 == null)
-+		return '';
-+
-+	return ' (IPv4：' + (v4 || 0) + '，IPv6：' + (v6 || 0) + ')';
-+}
 +
 +function apply(d) {
 +	try {
@@ -252,21 +237,21 @@ new file mode 100644
 +		}
 +
 +		if (f.load) {
-+			/* PPE 的表项和加速连接都按协议族分开算：IPv4 与 IPv6 各有一张 flow 表
-+			 * （IPv4 上限 2048 项，实测 v4_l3_flows 正好停在 2048；IPv6 的 5-tuple
-+			 * 表同样是 2048 项，见 SSDK 的 IN_FLOW_IPV6_5TUPLE_TBL_MAX_ENTRY），
-+			 * 每条加速连接要占正向和反向各一个表项，所以能加速的连接数约为表项数
-+			 * 的一半：两族各约 1024 条。把连接数和表项数一起显示，才能看出离满还有
-+			 * 多远 —— 只报连接数会让人以为 2048 是连接数。
++			/* PPE/SFE 在 ECM 里都是按协议族各一个 front end（ecm_ppe_ipv{4,6}、
++			 * ecm_sfe_ipv{4,6}），所以两族分别显示、同时给出合计：
++			 *   PPE加速:9(IPv4 9 / IPv6 0);SFE连接 0(IPv4 0 / IPv6 0) ECM连接总数:14
++			 *
++			 * 注意合计是「加速的连接数」，不是 PPE 表项数：每条加速连接要占正向
++			 * 和反向各一个 flow 表项（实测 v4_l3_flows = 2 x 加速连接数），IPv4 表
++			 * 到 2048 项为止，也就是约 1024 条连接。IPv6 另有自己的 5-tuple 表
++			 * （同样 2048 项，SSDK IN_FLOW_IPV6_5TUPLE_TBL_MAX_ENTRY）。
 +			 *
 +			 * ECM连接总数取自 ecm_db，含两族、也含尚未加速的连接，口径不同。 */
-+			var aval = 'PPE连接: IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0) +
-+			           '  PPE流表: IPv4 ' + (d.ppe_flows_v4 || 0) + '/2048, IPv6 ' + (d.ppe_flows_v6 || 0) + '/2048' +
-+			           '  ECM连接总数: ' + (d.conns || 0);
-+
-+			/* SFE 前端在这块板子上不参与转发（流量都走 PPE），有数才追加，免得整行恒为 0。 */
-+			if ((d.sfe_accel || 0) > 0)
-+				aval += '  SFE: ' + d.sfe_accel + familySuffix(d, 'sfe_accel');
++			var aval = 'PPE加速:' + (d.ppe_accel || 0) +
++			           '(IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0) + ');' +
++			           'SFE连接 ' + (d.sfe_accel || 0) +
++			           '(IPv4 ' + (d.sfe_accel_v4 || 0) + ' / IPv6 ' + (d.sfe_accel_v6 || 0) + ') ' +
++			           'ECM连接总数:' + (d.conns || 0);
 +
 +			if (f.accel)
 +				f.accel.cells[1].textContent = aval;
