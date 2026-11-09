@@ -258,6 +258,17 @@ platform_check_image() {
 	return 1
 }
 
+platform_copy_config() {
+	case "$(board_name)" in
+	jdcloud,er2|\
+	jdcloud,re-cs-08)
+		# emmc_upgrade_tar() left the overlay area zeroed/invalid; write the
+		# configuration backup there so the next boot restores it.
+		emmc_copy_config
+		;;
+	esac
+}
+
 platform_do_upgrade() {
 	CI_UBIPART="rootfs"
 	CI_ROOTPART="ubi_rootfs"
@@ -335,23 +346,28 @@ platform_do_upgrade() {
 		;;
 	jdcloud,er2|\
 	jdcloud,re-cs-08)
-		# ER2 has a 64G eMMC with a GPT (no NAND/UBI), so the UBI path does
-		# not apply.  Write the tar to the GPT partitions like the other eMMC
-		# boards do: the kernel goes to "0:HLOS" and the squashfs to
-		# "rootfs"; both partitions are zeroed first, so an overlay kept in
-		# the padded tail of the rootfs is gone as well, and a separate
-		# rootfs_data partition is re-formatted by emmc_do_upgrade().
+		# ER2 is a 64G eMMC board with a GPT: the kernel is the "0:HLOS"
+		# partition, the squashfs is "rootfs", and there is no separate
+		# data partition - the overlay lives in the padded tail of the rootfs
+		# partition (the same layout the vendor and the immortalwrt ipq53xx
+		# target use, which is why they pass exactly these two names and no
+		# CI_DATAPART).
 		#
-		# QSDK's bootconfig renames the partitions to <name>_1 for NAND and
-		# keeps the plain GPT names for eMMC, but the vendor GPT of this board
-		# is external to the source tree, so probe for both spellings.
-		for p in "0:HLOS" "0:HLOS_1"; do
-			[ -n "$(find_mmc_part "$p")" ] && { block_kernel="$p"; break; }
-		done
-		for p in "rootfs" "rootfs_1"; do
-			[ -n "$(find_mmc_part "$p")" ] && { block_rootfs="$p"; break; }
-		done
-		emmc_do_upgrade "$1"
+		# Use the generic eMMC upgrade rather than the dd helper above: it
+		# writes the same two partitions but only invalidates the overlay
+		# area (8 blocks right after the rootfs, aligned to the 64KiB
+		# ROOTDEV_OVERLAY_ALIGN libfstools uses) when the configuration is
+		# not kept, so fstools creates an empty overlay on the next boot and
+		# nothing installed in the old one survives - which is what "do not
+		# keep configuration" has to mean.  Keeping the configuration writes
+		# the backup tar to that same offset, see platform_copy_config()
+		# below.
+		#
+		# emmc_do_upgrade is not used here because this file defines its own
+		# (dd based) version further up, which shadows the generic one.
+		CI_KERNPART="0:HLOS"
+		CI_ROOTPART="rootfs"
+		emmc_upgrade_tar "$1"
 		;;
 	*)
 		# A board which reaches this arm gets no flash at all, but do_stage2 prints
