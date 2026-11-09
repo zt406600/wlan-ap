@@ -1,0 +1,53 @@
+# ---
+# ppe-drv: keep the accelerated flow on a deacceleration exception on ER2
+#
+# The flow_deacclr_dis=1 module option in /etc/modules.d/31-qca-nss-ppe never
+# reaches the module: kmodloader does not hand the options of that file to
+# insmod on this target, the parameter stays at its default N even when the PPE
+# core is loaded before the datapath driver (measured on the board).
+# Set it from the device tree instead for this board only:
+#
+#   - ppe_drv_cc.c skips the flow flush when flow_deacclr_dis is set, so an
+#     exception only punts the offending packet to the CPU;
+#   - ppe_drv_l3_route_ctrl_init(), which runs from the probe (i.e. after this),
+#     then leaves the global MRU/MTU deacceleration disabled as well.
+#
+# Measured on ER2 with 200 fragmented UDP packets: with the flag set the PPE
+# keeps the flow it created (create_req +1, destroy +0), without it the flow is
+# rebuilt 80 times and destroyed 305 times.
+#
+# Other boards are unaffected (they do not match the compatible), and userspace
+# can still flip the parameter through sysfs at runtime.
+# ---
+--- a/drv/ppe_drv/ppe_drv.c
++++ b/drv/ppe_drv/ppe_drv.c
+@@ -5172,6 +5172,29 @@
+ 		return -EINVAL;
+ 	}
+ 
++	/*
++	 * JDCloud ER2: keep an accelerated flow in the hardware when a packet
++	 * hits a deacceleration exception (MRU/MTU/IPv6 fragment/...), i.e. punt
++	 * only that packet to the CPU instead of flushing and freeing the flow
++	 * (ppe_drv_cc.c: flow_deacclr_dis skips the flush, and the global MRU/MTU
++	 * deacceleration below is turned off).  Without it PPE flushes the flow on
++	 * every exception and ECM re-accelerates it again, which on this board
++	 * degenerates into a create/flush loop for the fragmented peer->LAN IPv6
++	 * traffic of the P2P/VPN flows: with 200 fragmented UDP packets the PPE
++	 * rebuilt 80 flows and destroyed 305, while with the flag set it kept the
++	 * single flow it had.
++	 *
++	 * The value normally comes from the flow_deacclr_dis=1 module option in
++	 * /etc/modules.d/31-qca-nss-ppe, but kmodloader does not hand it to
++	 * insmod on this target, so the option never reached the module.  The
++	 * board is matched through the device tree instead, which is independent
++	 * of how the module gets loaded and leaves every other board alone.  An
++	 * explicit flow_deacclr_dis=0 on the command line still does not override
++	 * this, userspace can flip it through sysfs at runtime.
++	 */
++	if (of_machine_is_compatible("jdcloud,er2"))
++		flow_deacclr_dis = true;
++
+ 	get_random_bytes(&ppe_drv_jhash_rnd, sizeof(ppe_drv_jhash_rnd));
+ 
+ 	/*
