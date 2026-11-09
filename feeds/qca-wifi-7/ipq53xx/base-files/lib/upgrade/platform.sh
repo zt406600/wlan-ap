@@ -330,8 +330,18 @@ platform_do_upgrade() {
 	indio,um-325be|\
 	zyxel,nwa130be|\
 	zyxel,nwa210be|\
-	zyxel,nwa50be)
+	zyxel,nwa50be|\
+	jdcloud,er2|\
+	jdcloud,re-cs-08)
 		nand_upgrade_tar "$1"
+		;;
+	*)
+		# A board which reaches this arm gets no flash at all, but do_stage2 prints
+		# "Upgrade completed" regardless.  Fail loudly instead of silently keeping
+		# the running firmware (the tar is never written, so the old rootfs and
+		# every package installed into it survive).
+		echo "ERROR: no upgrade method for board '$(board_name)', aborting" >&2
+		exit 1
 		;;
 	esac
 }
