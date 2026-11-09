@@ -85,8 +85,8 @@ do_flash_emmc() {
 	[ -b "$emmcblock" ] || emmcblock=$(find_mmc_part $2)
 
 	[ -z "$emmcblock" ] && {
-		echo failed to find $2
-		return
+		echo "ERROR: eMMC partition $2 not found" >&2
+		return 1
 	}
 
 	echo erase $4 / $emmcblock
@@ -168,8 +168,8 @@ emmc_do_upgrade() {
 	local board_dir=$(tar tf $tar_file | grep -m 1 '^sysupgrade-.*/$')
 	board_dir=${board_dir%/}
 	echo "block_kernel=$block_kernel, block_rootfs=$block_rootfs" > /dev/console
-	do_flash_emmc $tar_file $block_kernel $board_dir kernel
-	do_flash_emmc $tar_file $block_rootfs $board_dir root
+	do_flash_emmc $tar_file $block_kernel $board_dir kernel || exit 1
+	do_flash_emmc $tar_file $block_rootfs $board_dir root || exit 1
 
 	local emmcblock="$(find_mmc_part "rootfs_data")"
 	if [ -e "$emmcblock" ]; then
@@ -330,10 +330,28 @@ platform_do_upgrade() {
 	indio,um-325be|\
 	zyxel,nwa130be|\
 	zyxel,nwa210be|\
-	zyxel,nwa50be|\
+	zyxel,nwa50be)
+		nand_upgrade_tar "$1"
+		;;
 	jdcloud,er2|\
 	jdcloud,re-cs-08)
-		nand_upgrade_tar "$1"
+		# ER2 has a 64G eMMC with a GPT (no NAND/UBI), so the UBI path does
+		# not apply.  Write the tar to the GPT partitions like the other eMMC
+		# boards do: the kernel goes to "0:HLOS" and the squashfs to
+		# "rootfs"; both partitions are zeroed first, so an overlay kept in
+		# the padded tail of the rootfs is gone as well, and a separate
+		# rootfs_data partition is re-formatted by emmc_do_upgrade().
+		#
+		# QSDK's bootconfig renames the partitions to <name>_1 for NAND and
+		# keeps the plain GPT names for eMMC, but the vendor GPT of this board
+		# is external to the source tree, so probe for both spellings.
+		for p in "0:HLOS" "0:HLOS_1"; do
+			[ -n "$(find_mmc_part "$p")" ] && { block_kernel="$p"; break; }
+		done
+		for p in "rootfs" "rootfs_1"; do
+			[ -n "$(find_mmc_part "$p")" ] && { block_rootfs="$p"; break; }
+		done
+		emmc_do_upgrade "$1"
 		;;
 	*)
 		# A board which reaches this arm gets no flash at all, but do_stage2 prints
