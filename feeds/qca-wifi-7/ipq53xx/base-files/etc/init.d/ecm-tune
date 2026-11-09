@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+#
+# Tune the ECM datapath front end for this board.
+#
+# The PPE can hold 2048 IPv4 flow entries (PPE_DRV_V4_MAX_CONN_COUNT in
+# qca-nss-ppe, and the hardware flow table is sized the same), i.e. roughly
+# 1024 accelerated bidirectional connections, because every accelerated
+# connection occupies a flow entry in each direction.  With the stock settings
+# ECM keeps issuing acceleration requests after that limit is reached and the
+# engine evicts rules that are already installed to make room for the new ones.
+# Under P2P traffic (thousands of peers, thousands of short lived flows) that
+# turns into a create/flush storm and dmesg fills up with
+#
+#   ppe_rfs_ipv4_rule_create[468]: Error in pushing Passive PPE RFS rules
+#
+# while everything that cannot be accelerated is forwarded by the CPU.
+#
+#   accel_delay_pkts=30
+#	A flow has to send 30 packets on the slow path before it may occupy a
+#	flow table entry.  Peer discovery, STUN, DNS and other single shot flows
+#	never get there, so the table stays available for the flows that carry
+#	payload.  This does not add capacity, it only changes who gets to use it.
+#
+#   accel_limit_mode=1 (FIXED)
+#	Stop issuing acceleration requests at the engine limit instead of
+#	evicting the rules that are already in place: fewer evictions and
+#	re-accelerations, and no retry storm once the table is full.
+#
+# Both are runtime knobs of the ecm module and are reset to their defaults
+# (0 and 0) on every boot, hence this script.  It runs after qca-nss-ecm
+# (START=26), which loads the module and registers the procfs entries.
+
+START=27
+
+start() {
+	local ecm=/proc/sys/net/ecm
+	local i
+
+	[ -d "$ecm" ] || return 0
+
+	# qca-nss-ecm (S26) registers these through the ecm module; wait for it.
+	for i in $(seq 1 10); do
+		[ -w "$ecm/ecm_ppe_ipv4/accel_limit_mode" ] && break
+		sleep 1
+	done
+
+	echo 30 > "$ecm/ecm_classifier_default/accel_delay_pkts" 2>/dev/null
+	echo 1 > "$ecm/ecm_ppe_ipv4/accel_limit_mode" 2>/dev/null
+}
