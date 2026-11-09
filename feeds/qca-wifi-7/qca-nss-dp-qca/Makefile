@@ -22,7 +22,7 @@ define KernelPackage/qca-nss-dp-qca
 		+TARGET_ipq54xx:kmod-qca-nss-ppe
   TITLE:=Kernel driver for NSS data plane
   FILES:=$(PKG_BUILD_DIR)/qca-nss-dp.ko
-  AUTOLOAD:=$(call AutoLoad,31,qca-nss-dp)
+  AUTOLOAD:=$(call AutoLoad,32,qca-nss-dp)
 endef
 
 define KernelPackage/qca-nss-dp-qca/Description
