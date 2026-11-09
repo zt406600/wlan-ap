@@ -24,7 +24,7 @@ The counters are reported per address family: ECM keeps separate front ends for
 IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}), so both families are shown
 together with their sum:
 
-	PPE加速:9(IPv4 9 / IPv6 0);SFE连接 0(IPv4 0 / IPv6 0) ECM连接总数:14
+	PPE加速:9(IPv4 9 / IPv6 0);SFE连接:0(IPv4 0 / IPv6 0) ECM连接总数:14
 
 The PPE/SFE figures are accelerated connection counts, not PPE flow table
 entries: each accelerated connection occupies a flow entry in either direction
@@ -239,7 +239,7 @@ new file mode 100644
 +		if (f.load) {
 +			/* PPE/SFE 在 ECM 里都是按协议族各一个 front end（ecm_ppe_ipv{4,6}、
 +			 * ecm_sfe_ipv{4,6}），所以两族分别显示、同时给出合计：
-+			 *   PPE加速:9(IPv4 9 / IPv6 0);SFE连接 0(IPv4 0 / IPv6 0) ECM连接总数:14
++			 *   PPE加速:9(IPv4 9 / IPv6 0);SFE连接:0(IPv4 0 / IPv6 0) ECM连接总数:14
 +			 *
 +			 * 注意合计是「加速的连接数」，不是 PPE 表项数：每条加速连接要占正向
 +			 * 和反向各一个 flow 表项（实测 v4_l3_flows = 2 x 加速连接数），IPv4 表
@@ -249,7 +249,7 @@ new file mode 100644
 +			 * ECM连接总数取自 ecm_db，含两族、也含尚未加速的连接，口径不同。 */
 +			var aval = 'PPE加速:' + (d.ppe_accel || 0) +
 +			           '(IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0) + ');' +
-+			           'SFE连接 ' + (d.sfe_accel || 0) +
++			           'SFE连接:' + (d.sfe_accel || 0) +
 +			           '(IPv4 ' + (d.sfe_accel_v4 || 0) + ' / IPv6 ' + (d.sfe_accel_v6 || 0) + ') ' +
 +			           'ECM连接总数:' + (d.conns || 0);
 +
