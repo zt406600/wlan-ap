@@ -21,13 +21,24 @@ jumping page; load() is part of the same Promise.all, so the table and the two
 extra rows are written to the DOM in one synchronous pass.
 
 The counters are reported per address family: ECM keeps separate front ends for
-IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table has
-separate v4_*/v6_* entries, so the controller reads both families and the front
-end shows the split next to the totals.  The CPU temperature is read from the
-thermal zone the controller recognises as the CPU sensor (a zone whose type
-contains "cpu", falling back to tsens_tz_sensor14 on ipq5332, whose zones
-ipq5332-thermald.dtsi renames) instead of the maximum over all sensors, and is
-labelled as such.
+IPv4 and IPv6 (ecm_ppe_ipv{4,6}, ecm_sfe_ipv{4,6}) and the PPE flow table keeps
+separate v4_*/v6_* counters, so the controller reads both families.  The
+acceleration row reports, per family, both the accelerated connections and the
+flow table entries in use:
+
+	PPE连接: IPv4 9 / IPv6 0  PPE流表: IPv4 18/2048, IPv6 0/2048  ECM连接总数: 14
+
+Each accelerated connection occupies one flow table entry per direction, so the
+single number the first version printed ("PPE: 9") read like table usage while
+it was a connection count, and it hid the IPv6 split.  The table is what fills
+up: IPv4 stops at 2048 entries, i.e. about 1024 accelerated connections, and the
+IPv6 5-tuple table holds 2048 entries as well.  SFE is only appended when it is
+non-zero, because this board forwards through the PPE front end.
+
+The CPU temperature is read from the thermal zone the controller recognises as
+the CPU sensor (a zone whose type contains "cpu", falling back to
+tsens_tz_sensor14 on ipq5332, whose zones ipq5332-thermald.dtsi renames)
+instead of the maximum over all sensors, and is labelled as such.
 
 Dropped from the first version: the standalone "Status -> NSS overview" page
 (luasrc/view/nss_status/status.htm plus its template() entry) and the
@@ -36,17 +47,16 @@ adding anything, and the add-on is now a pure data source for the overview.
 
 Signed-off-by: leerep <leerep@163.com>
 ---
- package/luci-app-nss-overview/Makefile        |  13 +
- .../resources/view/status/include/11_nss.js   | 259 ++++++++++++++++++
- .../luasrc/controller/nss_status.lua          | 138 ++++++++++
- 3 files changed, 410 insertions(+)
+ package/luci-app-nss-overview/Makefile | 13 +++++++++++++
+ package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js | 268 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/luci-app-nss-overview/luasrc/controller/nss_status.lua | 138 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 419 insertions(+)
  create mode 100644 package/luci-app-nss-overview/Makefile
  create mode 100644 package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
  create mode 100644 package/luci-app-nss-overview/luasrc/controller/nss_status.lua
 
 diff --git a/package/luci-app-nss-overview/Makefile b/package/luci-app-nss-overview/Makefile
 new file mode 100644
-index 0000000..0d5101a
 --- /dev/null
 +++ b/package/luci-app-nss-overview/Makefile
 @@ -0,0 +1,13 @@
@@ -63,12 +73,12 @@ index 0000000..0d5101a
 +include $(TOPDIR)/feeds/luci/luci.mk
 +
 +# call BuildPackage - OpenWrt buildroot signature
+
 diff --git a/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
 new file mode 100644
-index 0000000..0b96377
 --- /dev/null
 +++ b/package/luci-app-nss-overview/htdocs/luci-static/resources/view/status/include/11_nss.js
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,268 @@
 +'use strict';
 +'require baseclass';
 +
@@ -242,11 +252,21 @@ index 0000000..0b96377
 +		}
 +
 +		if (f.load) {
-+			/* PPE/SFE 的加速连接数 = IPv4 + IPv6（见 familySuffix 的说明）；
++			/* PPE 的表项和加速连接都按协议族分开算：IPv4 与 IPv6 各有一张 flow 表
++			 * （IPv4 上限 2048 项，实测 v4_l3_flows 正好停在 2048；IPv6 的 5-tuple
++			 * 表同样是 2048 项，见 SSDK 的 IN_FLOW_IPV6_5TUPLE_TBL_MAX_ENTRY），
++			 * 每条加速连接要占正向和反向各一个表项，所以能加速的连接数约为表项数
++			 * 的一半：两族各约 1024 条。把连接数和表项数一起显示，才能看出离满还有
++			 * 多远 —— 只报连接数会让人以为 2048 是连接数。
++			 *
 +			 * ECM连接总数取自 ecm_db，含两族、也含尚未加速的连接，口径不同。 */
-+			var aval = 'PPE: ' + (d.ppe_accel || 0) + familySuffix(d, 'ppe_accel') +
-+			           ', SFE: ' + (d.sfe_accel || 0) + familySuffix(d, 'sfe_accel') +
-+			           ', ECM连接总数: ' + (d.conns || 0);
++			var aval = 'PPE连接: IPv4 ' + (d.ppe_accel_v4 || 0) + ' / IPv6 ' + (d.ppe_accel_v6 || 0) +
++			           '  PPE流表: IPv4 ' + (d.ppe_flows_v4 || 0) + '/2048, IPv6 ' + (d.ppe_flows_v6 || 0) + '/2048' +
++			           '  ECM连接总数: ' + (d.conns || 0);
++
++			/* SFE 前端在这块板子上不参与转发（流量都走 PPE），有数才追加，免得整行恒为 0。 */
++			if ((d.sfe_accel || 0) > 0)
++				aval += '  SFE: ' + d.sfe_accel + familySuffix(d, 'sfe_accel');
 +
 +			if (f.accel)
 +				f.accel.cells[1].textContent = aval;
@@ -327,10 +347,9 @@ index 0000000..0b96377
 +		return null;
 +	}
 +});
-+
+
 diff --git a/package/luci-app-nss-overview/luasrc/controller/nss_status.lua b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
 new file mode 100644
-index 0000000..30ddec9
 --- /dev/null
 +++ b/package/luci-app-nss-overview/luasrc/controller/nss_status.lua
 @@ -0,0 +1,138 @@
@@ -472,6 +491,3 @@ index 0000000..30ddec9
 +function index()
 +	entry({"admin", "status", "nss_status", "data"}, call("action_data")).leaf = true
 +end
--- 
-2.43.0
-
