@@ -1,23 +1,24 @@
-From 8319523d2ae87b443ef694102e431545ea4cbcea Mon Sep 17 00:00:00 2001
+From 5b0a1c3a8e8bb9f2bd0eef6f7c5a9f4e2d31c0aa Mon Sep 17 00:00:00 2001
 From: leerep <leerep@163.com>
 Date: Thu, 24 Sep 2026 12:00:03 +0800
 Subject: [PATCH] iptables: add the FULLCONE NAT target
 
-Register libxt_NAT's FULLCONE target so that iptables can install the rules
-firewall3 generates for a fullcone zone.  The target reuses MASQUERADE's
-options (--to-ports, --random, --random-fully) and its target size, and the
-kernel side is provided by 985-add-sonic-fullcone-to-ipt.patch of the
-qca-wifi-7 feed.
+Extension for iptables to use the FULLCONE target registered by
+985-add-sonic-fullcone-to-ipt.patch, re-synced with openwrt-sonic-fullcone
+f87ac2a (the patch itself is unchanged since 454ab55).
+
+The kernel side shares masquerade_tg_check() now, so this only adds the
+userspace plumbing for both ip and ip6 tables.
 
 Signed-off-by: leerep <leerep@163.com>
+
 ---
- .../iptables/patches/901-sonic-fullcone.patch | 85 +++++++++++++++++++
+ 901-sonic-fullcone.patch | 85 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 85 insertions(+)
  create mode 100644 package/network/utils/iptables/patches/901-sonic-fullcone.patch
 
 diff --git a/package/network/utils/iptables/patches/901-sonic-fullcone.patch b/package/network/utils/iptables/patches/901-sonic-fullcone.patch
 new file mode 100644
-index 0000000000..14f88edc61
 --- /dev/null
 +++ b/package/network/utils/iptables/patches/901-sonic-fullcone.patch
 @@ -0,0 +1,85 @@
@@ -106,6 +107,3 @@ index 0000000000..14f88edc61
 + 		.name		= "REDIRECT",
 + 		.version	= XTABLES_VERSION,
 + 		.family		= NFPROTO_IPV4,
--- 
-2.43.0
-

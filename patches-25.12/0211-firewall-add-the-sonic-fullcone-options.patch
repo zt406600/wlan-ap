@@ -9,42 +9,58 @@ protocols that get a fullcone SNAT rule.  Those rules use the FULLCONE target
 from the iptables patch instead of MASQUERADE, which is allowed on both hooks
 and therefore provides the endpoint independent mapping and filtering.
 
+Re-synced with openwrt-sonic-fullcone f87ac2a, where the patch was rewritten
+(153b2a3): the FULLCONE target is probed instead of assumed, so a kernel
+without it keeps working, and the SNAT/routing rules are generated from the
+per-protocol port ranges instead of one hand written uci rule set.
+
 Signed-off-by: leerep <leerep@163.com>
+
 ---
- .../firewall/patches/001-sonic-fullcone.patch | 150 ++++++++++++++++++
- 1 file changed, 150 insertions(+)
+ 001-sonic-fullcone.patch | 300 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 300 insertions(+)
  create mode 100644 package/network/config/firewall/patches/001-sonic-fullcone.patch
 
 diff --git a/package/network/config/firewall/patches/001-sonic-fullcone.patch b/package/network/config/firewall/patches/001-sonic-fullcone.patch
 new file mode 100644
-index 0000000000..b2a4973dbc
 --- /dev/null
 +++ b/package/network/config/firewall/patches/001-sonic-fullcone.patch
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,300 @@
 +From: openwrt-sonic-fullcone contributors
 +Date: Wed, 9 Apr 2026 00:00:00 +0000
 +Subject: [PATCH] firewall3: add SONiC fullcone NAT with per-zone and
 + per-protocol control
 +
 +Adds zone-level fullcone option with fullcone_proto list to firewall3.
-+defaults.fullcone is a global gate.
++defaults.fullcone is a global gate. When the kernel does not offer the
++FULLCONE target, fw3 warns and keeps ordinary masquerading.
 +
 +Uses native fw3 parse infrastructure (FW3_OPT / FW3_LIST) — no manual
-+uci_lookup_option calls. fullcone_proto reuses fw3_parse_protocol.
++uci_lookup_option calls. fullcone_proto goes through fw3_parse_protocol
++after looking up the names musl does not know (udplite, sctp, dccp).
 +
 +Requires 984 (kernel NAT core) + 985 (kernel FULLCONE target) +
 +901 (iptables userspace FULLCONE target) patches. Uses "FULLCONE"
 +target which supports both PREROUTING and POSTROUTING hooks,
 +providing full EIM+EIF.
++
++Fullcone covers TCP, UDP, UDP-Lite, SCTP and DCCP, the protocols with
++ports, or the subset fullcone_proto lists; other traffic keeps ordinary
++masquerading. POSTROUTING rules take the zone's masq_src/masq_dest
++restrictions, are each followed by the masquerade rule with the same
++restrictions, and map to ports 1024-65535; iptables takes no port range
++for UDP-Lite. The PREROUTING rules are emitted once per zone, after
++port forwards, and take no address restrictions: they only send packets
++to existing mappings.
 +---
-+ defaults.c |  2 ++
-+ options.h  |  4 +++
-+ zones.c    | 65 ++++++++++++++++++++++++++++++++++++++++++++++++++----
-+ 3 files changed, 67 insertions(+), 4 deletions(-)
++ defaults.c |   6 +++
++ options.h  |   4 ++
++ zones.c    | 159 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 169 insertions(+)
 +
 +--- a/defaults.c
 ++++ b/defaults.c
-+@@ -49,6 +49,8 @@ const struct fw3_option fw3_flag_opts[]
++@@ -49,6 +49,8 @@ const struct fw3_option fw3_flag_opts[] = {
 + 	FW3_OPT("synflood_rate",       limit,    defaults, syn_flood_rate),
 + 	FW3_OPT("synflood_burst",      int,      defaults, syn_flood_rate.burst),
 + 
@@ -53,6 +69,17 @@ index 0000000000..b2a4973dbc
 + 	FW3_OPT("tcp_syncookies",      bool,     defaults, tcp_syncookies),
 + 	FW3_OPT("tcp_ecn",             int,      defaults, tcp_ecn),
 + 	FW3_OPT("tcp_window_scaling",  bool,     defaults, tcp_window_scaling),
++@@ -163,6 +165,10 @@ fw3_load_defaults(struct fw3_state *state, struct uci_package *p)
++ 
++ 		/* exists in both ipv4 and ipv6, if at all, so only check ipv4 */
++ 		check_target(e, &defs->flow_offloading, "FLOWOFFLOAD", false);
+++
+++		/* fw3 only generates FULLCONE rules for ipv4 */
+++		if (defs->fullcone)
+++			check_target(e, &defs->fullcone, "FULLCONE", false);
++ 	}
++ }
++ 
 +--- a/options.h
 ++++ b/options.h
 +@@ -297,6 +297,7 @@ struct fw3_defaults
@@ -75,17 +102,130 @@ index 0000000000..b2a4973dbc
 + 	int log;
 +--- a/zones.c
 ++++ b/zones.c
-+@@ -84,6 +84,9 @@ const struct fw3_option fw3_zone_opts[]
++@@ -58,6 +58,49 @@ enum fw3_zone_logmask {
++ 	FW3_ZONE_LOG_MANGLE = (1 << 1),
++ };
++ 
+++/* SONiC fullcone applies to the protocols with ports. musl does not know
+++ * all of their names, so fullcone_proto looks them up here first.
+++ */
+++static const struct {
+++	const char *name;
+++	uint32_t protocol;
+++} fullcone_protos[] = {
+++	{ "tcp",     IPPROTO_TCP     },
+++	{ "udp",     IPPROTO_UDP     },
+++	{ "udplite", IPPROTO_UDPLITE },
+++	{ "sctp",    IPPROTO_SCTP    },
+++	{ "dccp",    IPPROTO_DCCP    },
+++};
+++
+++/* Stands in for an entry fw3_parse_protocol() rejected */
+++#define FULLCONE_PROTO_INVALID	256
+++
+++static bool
+++fw3_parse_fullcone_proto(void *ptr, const char *val, bool is_list)
+++{
+++	char num[sizeof("4294967295")];
+++	unsigned int i;
+++
+++	for (i = 0; i < ARRAY_SIZE(fullcone_protos); i++)
+++	{
+++		if (!strcmp(val, fullcone_protos[i].name))
+++		{
+++			snprintf(num, sizeof(num), "%u", fullcone_protos[i].protocol);
+++			return fw3_parse_protocol(ptr, num, is_list);
+++		}
+++	}
+++
+++	if (fw3_parse_protocol(ptr, val, is_list))
+++		return true;
+++
+++	/* Keep the entry, so that a list of invalid ones does not read as
+++	 * an empty list, which means all protocols.
+++	 */
+++	snprintf(num, sizeof(num), "%u", FULLCONE_PROTO_INVALID);
+++	fw3_parse_protocol(ptr, num, is_list);
+++	return false;
+++}
+++
++ const struct fw3_option fw3_zone_opts[] = {
++ 	FW3_OPT("enabled",             bool,     zone,     enabled),
++ 
++@@ -84,6 +127,9 @@ const struct fw3_option fw3_zone_opts[] = {
 + 	FW3_OPT("mtu_fix",             bool,     zone,     mtu_fix),
 + 	FW3_OPT("custom_chains",       bool,     zone,     custom_chains),
 + 
 ++	FW3_OPT("fullcone",            bool,     zone,     fullcone),
-++	FW3_LIST("fullcone_proto",     protocol, zone,     fullcone_proto),
+++	FW3_LIST("fullcone_proto",     fullcone_proto, zone, fullcone_proto),
 ++
 + 	FW3_OPT("log",                 int,      zone,     log),
 + 	FW3_OPT("log_limit",           limit,    zone,     log_limit),
 + 
-+@@ -216,6 +219,7 @@ fw3_alloc_zone(void)
++@@ -134,6 +180,62 @@ check_masq_addrs(struct list_head *head)
++ 	return (n_addr == 0 || n_failed < n_addr);
++ }
++ 
+++static bool
+++fullcone_proto_listed(struct fw3_zone *zone, uint32_t protocol)
+++{
+++	struct fw3_protocol *proto;
+++
+++	if (list_empty(&zone->fullcone_proto))
+++		return true;
+++
+++	list_for_each_entry(proto, &zone->fullcone_proto, list)
+++	{
+++		if (proto->any || (!proto->invert && proto->protocol == protocol))
+++			return true;
+++	}
+++
+++	return false;
+++}
+++
+++static void
+++check_fullcone_proto(struct uci_element *e, struct fw3_zone *zone)
+++{
+++	struct fw3_protocol *proto;
+++	bool applicable = false;
+++	unsigned int i;
+++
+++	if (list_empty(&zone->fullcone_proto))
+++		return;
+++
+++	list_for_each_entry(proto, &zone->fullcone_proto, list)
+++	{
+++		if (proto->any)
+++			return;
+++	}
+++
+++	list_for_each_entry(proto, &zone->fullcone_proto, list)
+++	{
+++		for (i = 0; i < ARRAY_SIZE(fullcone_protos); i++)
+++		{
+++			if (!proto->invert && proto->protocol == fullcone_protos[i].protocol)
+++				break;
+++		}
+++
+++		if (i < ARRAY_SIZE(fullcone_protos))
+++			applicable = true;
+++		else if (proto->protocol != FULLCONE_PROTO_INVALID)
+++			warn_elem(e, "ignores fullcone_proto %s%s, fullcone only applies "
+++			             "to tcp, udp, udplite, sctp and dccp",
+++			          proto->invert ? "!" : "", fw3_protoname(proto));
+++	}
+++
+++	if (!applicable)
+++	{
+++		warn_elem(e, "has no applicable fullcone_proto, disabling fullcone");
+++		zone->fullcone = false;
+++	}
+++}
+++
++ static void
++ resolve_networks(struct uci_element *e, struct fw3_zone *zone)
++ {
++@@ -216,6 +318,7 @@ fw3_alloc_zone(void)
 + 	INIT_LIST_HEAD(&zone->masq_src);
 + 	INIT_LIST_HEAD(&zone->masq_dest);
 + 	INIT_LIST_HEAD(&zone->cthelpers);
@@ -93,84 +233,96 @@ index 0000000000..b2a4973dbc
 + 
 + 	INIT_LIST_HEAD(&zone->old_addrs);
 + 
-+@@ -311,6 +315,11 @@ fw3_load_zones(struct fw3_state *state,
++@@ -267,6 +370,9 @@ fw3_load_zones(struct fw3_state *state, struct uci_package *p)
++ 		if (!defs->auto_helper && zone->auto_helper)
++ 			zone->auto_helper = false;
++ 
+++		if (!defs->fullcone && zone->fullcone)
+++			zone->fullcone = false;
+++
++ 		if (!zone->name || !*zone->name)
++ 		{
++ 			warn_elem(e, "has no name - ignoring");
++@@ -308,9 +414,17 @@ fw3_load_zones(struct fw3_state *state, struct uci_package *p)
++ 
++ 		resolve_networks(e, zone);
++ 
+++		if (zone->fullcone)
+++			check_fullcone_proto(e, zone);
+++
 + 		if (zone->masq)
 + 		{
 + 			fw3_setbit(zone->flags[0], FW3_FLAG_SNAT);
 ++			/* SONiC fullcone needs PREROUTING for reverse mapping (EIF),
 ++			 * so request DNAT chain creation when fullcone is enabled.
 ++			 */
-++			if (defs->fullcone && zone->fullcone)
+++			if (zone->fullcone)
 ++				fw3_setbit(zone->flags[0], FW3_FLAG_DNAT);
 + 		}
 + 
 + 		if (zone->custom_chains)
-+@@ -670,6 +679,10 @@ print_zone_rule(struct fw3_ipt_handle *h
-+ 	struct fw3_address *msrc;
-+ 	struct fw3_address *mdest;
-+ 	struct fw3_ipt_rule *r;
-++	struct fw3_defaults *defs = &state->defaults;
-++	struct fw3_protocol *proto;
-++	bool zone_fullcone = defs->fullcone && zone->fullcone;
-++	bool has_fc_filter = zone_fullcone && !list_empty(&zone->fullcone_proto);
++@@ -662,6 +776,40 @@ next_addr(struct fw3_address *addr, struct list_head *list,
++ 	return NULL;
++ }
 + 
-+ 	if (!fw3_is_family(zone, handle->family))
-+ 		return;
-+@@ -753,10 +766,50 @@ print_zone_rule(struct fw3_ipt_handle *h
+++static void
+++print_fullcone_rules(struct fw3_ipt_handle *handle, struct fw3_zone *zone,
+++                     struct fw3_address *src, struct fw3_address *dest,
+++                     bool snat)
+++{
+++	struct fw3_protocol proto = { };
+++	struct fw3_ipt_rule *r;
+++	unsigned int i;
+++
+++	for (i = 0; i < ARRAY_SIZE(fullcone_protos); i++)
+++	{
+++		proto.protocol = fullcone_protos[i].protocol;
+++
+++		if (!fullcone_proto_listed(zone, proto.protocol))
+++			continue;
+++
+++		r = fw3_ipt_rule_new(handle);
+++		fw3_ipt_rule_proto(r, &proto);
+++		fw3_ipt_rule_src_dest(r, src, dest);
+++		fw3_ipt_rule_target(r, "FULLCONE");
+++
+++		/* The port range keeps translated ports out of the privileged
+++		 * range, and the SONiC patch enforces 3-tuple uniqueness only
+++		 * for rules that have one. iptables takes no port range for
+++		 * UDP-Lite.
+++		 */
+++		if (snat && proto.protocol != IPPROTO_UDPLITE)
+++			fw3_ipt_rule_addarg(r, false, "--to-ports", "1024-65535");
+++
+++		fw3_ipt_rule_append(r, "zone_%s_%srouting", zone->name,
+++		                    snat ? "post" : "pre");
+++	}
+++}
+++
++ static void
++ print_zone_rule(struct fw3_ipt_handle *handle, struct fw3_state *state,
++                 bool reload, struct fw3_zone *zone)
++@@ -753,12 +901,23 @@ print_zone_rule(struct fw3_ipt_handle *handle, struct fw3_state *state,
 + 					                    handle->family, false)) || first_dest;
 + 				     first_dest = false)
 + 				{
-+-					r = fw3_ipt_rule_new(handle);
-+-					fw3_ipt_rule_src_dest(r, msrc, mdest);
-+-					fw3_ipt_rule_target(r, "MASQUERADE");
-+-					fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
-++					if (has_fc_filter)
-++					{
-++						/* Per-proto fullcone.
-++						 * Each rule is emitted twice: POSTROUTING (SNAT)
-++						 * and PREROUTING (DNAT reverse mapping for EIF).
-++						 */
-++						list_for_each_entry(proto, &zone->fullcone_proto, list) {
-++							/* POSTROUTING */
-++							r = fw3_ipt_rule_new(handle);
-++							fw3_ipt_rule_src_dest(r, msrc, mdest);
-++							fw3_ipt_rule_proto(r, proto);
-++							fw3_ipt_rule_target(r, "FULLCONE");
-++							fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
-++							/* PREROUTING (reverse mapping, per-proto) */
-++							r = fw3_ipt_rule_new(handle);
-++							fw3_ipt_rule_proto(r, proto);
-++							fw3_ipt_rule_target(r, "FULLCONE");
-++							fw3_ipt_rule_append(r, "zone_%s_prerouting", zone->name);
-++						}
-++						/* Fallback masquerade for non-fullcone traffic */
-++						r = fw3_ipt_rule_new(handle);
-++						fw3_ipt_rule_src_dest(r, msrc, mdest);
-++						fw3_ipt_rule_target(r, "MASQUERADE");
-++						fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
-++					}
-++					else if (zone_fullcone)
-++					{
-++						/* All traffic fullcone: POSTROUTING + PREROUTING */
-++						r = fw3_ipt_rule_new(handle);
-++						fw3_ipt_rule_src_dest(r, msrc, mdest);
-++						fw3_ipt_rule_target(r, "FULLCONE");
-++						fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
-++						r = fw3_ipt_rule_new(handle);
-++						fw3_ipt_rule_target(r, "FULLCONE");
-++						fw3_ipt_rule_append(r, "zone_%s_prerouting", zone->name);
-++					}
-++					else
-++					{
-++						/* Standard masquerade */
-++						r = fw3_ipt_rule_new(handle);
-++						fw3_ipt_rule_src_dest(r, msrc, mdest);
-++						fw3_ipt_rule_target(r, "MASQUERADE");
-++						fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
-++					}
+++					/* Fullcone first, masquerade for the rest */
+++					if (zone->fullcone)
+++						print_fullcone_rules(handle, zone, msrc, mdest, true);
+++
++ 					r = fw3_ipt_rule_new(handle);
++ 					fw3_ipt_rule_src_dest(r, msrc, mdest);
++ 					fw3_ipt_rule_target(r, "MASQUERADE");
++ 					fw3_ipt_rule_append(r, "zone_%s_postrouting", zone->name);
 + 				}
 + 			}
+++
+++			/* PREROUTING: DNAT reverse mapping for EIF, once per zone.
+++			 * No address restrictions here: the kernel only follows
+++			 * mappings set up by the POSTROUTING rules above.
+++			 */
+++			if (zone->fullcone)
+++				print_fullcone_rules(handle, zone, NULL, NULL, false);
 + 		}
--- 
-2.43.0
-
++ 		break;
++ 

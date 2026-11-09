@@ -3,23 +3,30 @@ Date: Fri, 25 Sep 2026 04:00:00 +0800
 Subject: [PATCH] luci-app-firewall: add the SONiC fullcone NAT options
 
 Add the fullcone NAT controls to the firewall web interface, so that the
-kernel side (0984/0985/0986 of the qca-wifi-7 feed plus the nftables/libnftnl
-fullcone expression) can be configured from LuCI instead of raw uci:
+kernel side (0984/0985/0986/0987 of the qca-wifi-7 feed plus the
+nftables/libnftnl fullcone expression) can be configured from LuCI instead of
+raw uci:
 
   - global "Fullcone NAT" gate in the defaults section,
   - per-zone "Fullcone NAT" switch (only for masquerading zones),
   - per-zone "Fullcone protocols" list in the advanced tab.
 
+Re-synced with openwrt-sonic-fullcone f87ac2a (e8f8d73): the "Fullcone
+protocols" help text now says that protocols without a port range always use
+ordinary masquerading and that UDP-Lite/SCTP/DCCP need connection tracking,
+the empty-selection placeholder became "All of the above", and the Chinese
+translations follow the new strings.
+
 The patch is applied to the luci feed checkout (a separate git repository that
 is not part of the openwrt tree) by `./setup.py --feed-patches`, see
-README.md.  It is a fixed-up version of the corrupt patch shipped by
-openwrt-sonic-fullcone (its last hunk header counts one line too many, which
-makes `git apply` fail with "corrupt patch") plus the Chinese translation
-appended to po/zh_Hans/firewall.po.
+README.md.  Unlike the patch shipped by openwrt-sonic-fullcone, whose hunk
+headers count one line too many and therefore fail with "corrupt patch", this
+one is generated with git diff, and it carries the Chinese translation appended
+to po/zh_Hans/firewall.po.
 
- ---
+---
 diff --git a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
-index 129d290e..c21300c1 100644
+index 129d290e..9996ecb6 100644
 --- a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
 +++ b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
 @@ -56,6 +56,12 @@ return view.extend({
@@ -48,14 +55,15 @@ index 129d290e..c21300c1 100644
  		o = s.taboption('general', form.Flag, 'mtu_fix', _('MSS clamping'));
  		o.modalonly = true;
  
-@@ -278,6 +290,23 @@ return view.extend({
+@@ -278,6 +290,24 @@ return view.extend({
  		o.placeholder = '0.0.0.0/0';
  		o.modalonly = true;
  
 +		o = s.taboption('advanced', form.MultiValue, 'fullcone_proto',
 +			_('Fullcone protocols'),
-+			_('Restrict fullcone NAT to specific L4 protocols. ' +
-+			  'When empty, all protocols use fullcone. ' +
++			_('Restrict fullcone NAT to these protocols; when empty, all of them use fullcone. ' +
++			  'Other protocols always use ordinary masquerading. ' +
++			  'UDP-Lite, SCTP and DCCP also need kernel connection tracking support, which OpenWrt does not enable by default. ' +
 +			  'Recommended: select only UDP for gaming/P2P use cases.'));
 +		o.value('tcp', _('TCP'));
 +		o.value('udp', _('UDP'));
@@ -65,7 +73,7 @@ index 129d290e..c21300c1 100644
 +		o.depends('fullcone', '1');
 +		o.modalonly = true;
 +		o.optional = true;
-+		o.placeholder = _('All protocols');
++		o.placeholder = _('All of the above');
 +		o.display_size = 5;
 +		o.delimiter = ' ';
 +
@@ -73,10 +81,10 @@ index 129d290e..c21300c1 100644
  		o.modalonly = true;
  
 diff --git a/applications/luci-app-firewall/po/zh_Hans/firewall.po b/applications/luci-app-firewall/po/zh_Hans/firewall.po
-index 0cbc248c..b1fc417f 100644
+index 192dd039..d2d0ae15 100644
 --- a/applications/luci-app-firewall/po/zh_Hans/firewall.po
 +++ b/applications/luci-app-firewall/po/zh_Hans/firewall.po
-@@ -1542,3 +1542,22 @@ msgstr "最多 65536 个条目。"
+@@ -1541,3 +1541,22 @@ msgstr "最多 65536 个条目。"
  #: applications/luci-app-firewall/htdocs/luci-static/resources/tools/firewall.js:338
  msgid "valid firewall mark"
  msgstr "有效的防火墙标记"
@@ -94,8 +102,8 @@ index 0cbc248c..b1fc417f 100644
 +msgid "Fullcone protocols"
 +msgstr "全锥形协议"
 +
-+msgid "Restrict fullcone NAT to specific L4 protocols. When empty, all protocols use fullcone. Recommended: select only UDP for gaming/P2P use cases."
-+msgstr "将全锥形 NAT 限制为特定的四层协议。留空则所有协议均使用全锥形 NAT。建议：游戏和 P2P 场景下仅选择 UDP。"
++msgid "Restrict fullcone NAT to these protocols; when empty, all of them use fullcone. Other protocols always use ordinary masquerading. UDP-Lite, SCTP and DCCP also need kernel connection tracking support, which OpenWrt does not enable by default. Recommended: select only UDP for gaming/P2P use cases."
++msgstr "仅对所选协议使用全锥形 NAT，留空则以上协议全部使用。其他协议始终使用普通的 IP 动态伪装。UDP-Lite、SCTP 和 DCCP 还需要内核为其开启连接跟踪，OpenWrt 默认未开启。建议：游戏和 P2P 场景下仅选择 UDP。"
 +
-+msgid "All protocols"
-+msgstr "所有协议"
++msgid "All of the above"
++msgstr "以上全部"

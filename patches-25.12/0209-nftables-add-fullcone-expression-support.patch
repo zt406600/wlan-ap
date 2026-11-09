@@ -3,10 +3,11 @@ From: leerep <leerep@163.com>
 Date: Thu, 24 Sep 2026 12:00:03 +0800
 Subject: [PATCH] nftables: add the fullcone expression support
 
-Port of Syrone Wong's nftables fullcone expression patch, synced with
-openwrt-sonic-fullcone 43cb206.  It adds the "fullcone" statement with its
-parser/scanner keywords, the linearize and delinearize support and the UAPI
-attributes, so that firewall4 can emit fullcone SNAT rules.
+Port of Syrone Wong's nftables fullcone expression patch, re-synced with
+openwrt-sonic-fullcone f87ac2a (the patch itself is unchanged since 43cb206).
+It adds the "fullcone" statement with its parser/scanner keywords, the
+linearize and delinearize support and the UAPI attributes, so that firewall4
+can emit fullcone SNAT rules.
 
 43cb206 makes the patch version independent between 1.1.1/1.1.6 and 1.1.7:
 the scanner keyword is written <*>"fullcone" (1.1.7 added the exclusive
@@ -17,14 +18,14 @@ after the NAT start-condition block, and fullcone_stmt gets its own
 neighbouring declarations were renamed in 1.1.7.
 
 Signed-off-by: leerep <leerep@163.com>
+
 ---
- ...bles-add-fullcone-expression-support.patch | 208 ++++++++++++++++++
+ 002-nftables-add-fullcone-expression-support.patch | 208 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 208 insertions(+)
  create mode 100644 package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
 
 diff --git a/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch b/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
 new file mode 100644
-index 0000000..9d006e4
 --- /dev/null
 +++ b/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
 @@ -0,0 +1,208 @@
@@ -236,6 +237,3 @@ index 0000000..9d006e4
 + 		[NFT_NAT_REDIR]	= "redirect",
 + 	};
 + 
--- 
-2.43.0
-
