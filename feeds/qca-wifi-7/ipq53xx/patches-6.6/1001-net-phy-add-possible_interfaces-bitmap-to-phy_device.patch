@@ -1,0 +1,37 @@
+From: leerep <leerep@163.com>
+Date: Tue, 3 Nov 2026 12:00:00 +0800
+Subject: [PATCH] net: phy: add the possible_interfaces bitmap to struct phy_device
+
+The QSDK 14.0 qca-nss-phy driver (qca8084) records the PHY interface modes
+that the attached PHY switches between depending on media speed:
+
+	qca8084_fill_possible_interfaces():
+		__set_bit(PHY_INTERFACE_MODE_SGMII, phydev->possible_interfaces);
+		__set_bit(PHY_INTERFACE_MODE_2500BASEX, phydev->possible_interfaces);
+
+mainline added that field in 6.11 ("net: phy: add possible_interfaces
+bitmap"), together with the phylink consumer that uses it to retrigger the
+MAC configuration when the PHY switches interface mode.  The QSDK 6.6 tree
+carries the field as well, so the driver builds there.
+
+Only the field is needed to build: this kernel (6.6.88) already provides
+DECLARE_PHY_INTERFACE_MASK(), PHY_INTERFACE_MODE_QUSGMII and the mask
+helpers (they came in with the QUSGMII support), and the driver only writes
+into the bitmap - the phylink logic that would read it is a 6.11 feature
+that this kernel does not have, so the bitmap stays unused here and no
+behaviour changes.  Adding the field keeps the QSDK driver source untouched
+instead of patching it with a local #ifdef.
+
+--- a/include/linux/phy.h
++++ b/include/linux/phy.h
+@@ -675,6 +675,8 @@ struct phy_device {
+ 	u32 dev_flags;
+ 
+ 	phy_interface_t interface;
++	/* bitmap of the interface modes the PHY switches between */
++	DECLARE_PHY_INTERFACE_MASK(possible_interfaces);
+ 
+ 	/*
+ 	 * forced speed & duplex (no autoneg)
+-- 
+2.43.0

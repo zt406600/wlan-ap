@@ -2,11 +2,10 @@
 # nss-dp: clamp the NAPI weight handed to the kernel to NAPI_POLL_WEIGHT
 #
 # The EDMA HAL budgets (ipq53xx: Rx 128, TxCmpl 256, RxFill 512) and the PPE-DS
-# budgets handed over by ppe_ds (TxCmpl 1024, RxFill 128) are larger than the
-# kernel's NAPI_POLL_WEIGHT (64).  netif_napi_add_weight() therefore reports
-#     "netif_napi_add_weight() called with weight 256"
-# once per device during probe, and such a weight also allows a single NAPI
-# instance to drain the whole net_rx_action() budget.
+# budgets handed over by ppe_ds are larger than the kernel NAPI_POLL_WEIGHT (64).
+# netif_napi_add_weight() therefore reports "netif_napi_add_weight() called with
+# weight %d" once per device during probe, and such a weight also allows a single
+# NAPI instance to drain the whole net_rx_action() budget.
 #
 # Cap the weight with edma_napi_weight() at every netif_napi_add_weight() call
 # site of the EDMA v2 HAL.  The budgets stay configurable for any value up to
@@ -15,7 +14,7 @@
 # ---
 --- a/hal/dp_ops/edma_dp/edma_v2/edma.h
 +++ b/hal/dp_ops/edma_dp/edma_v2/edma.h
-@@ -51,6 +51,26 @@
+@@ -40,6 +40,25 @@
  #error "Build Error: Platform is enabled with IOMMU/SMMU support."
  #endif
  
@@ -27,12 +26,11 @@
 + * nss_dp_tx_napi_budget) and the budgets handed over by ppe_ds
 + * (eth_txcomp_budget, eth_rxfill_budget) are tuned for throughput and can be
 + * larger than NAPI_POLL_WEIGHT.  netif_napi_add_weight() does not accept such
-+ * a weight, it reports
-+ *	"netif_napi_add_weight() called with weight %d"
-+ * once per device, and a weight above NAPI_POLL_WEIGHT also lets a single
-+ * NAPI instance drain the whole net_rx_action() budget, which the softirq
-+ * fairness model does not expect.  Cap the value handed to the kernel and keep
-+ * the budgets usable for anything up to the limit.
++ * a weight, it reports "netif_napi_add_weight() called with weight %d" once per
++ * device, and a weight above NAPI_POLL_WEIGHT also lets a single NAPI instance
++ * drain the whole net_rx_action() budget, which the softirq fairness model does
++ * not expect.  Cap the value handed to the kernel and keep the budgets usable
++ * for anything up to the limit.
 + */
 +static inline int edma_napi_weight(int budget)
 +{
@@ -44,39 +42,36 @@
  #define EDMA_DEVICE_NODE_NAME		"edma"
 --- a/hal/dp_ops/edma_dp/edma_v2/edma_cfg_rx.c
 +++ b/hal/dp_ops/edma_dp/edma_v2/edma_cfg_rx.c
-@@ -1649,7 +1662,8 @@
+@@ -1819,7 +1819,7 @@
  #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
  		netif_napi_add(netdev, &rxdesc_ring->napi, napi_poll, nss_dp_rx_napi_budget);
  #else
 -		netif_napi_add_weight(netdev, &rxdesc_ring->napi, napi_poll, nss_dp_rx_napi_budget);
-+		netif_napi_add_weight(netdev, &rxdesc_ring->napi, napi_poll,
-+				edma_napi_weight(nss_dp_rx_napi_budget));
++		netif_napi_add_weight(netdev, &rxdesc_ring->napi, napi_poll, edma_napi_weight(nss_dp_rx_napi_budget));
  #endif
  		rxdesc_ring->napi_added = true;
  	}
-@@ -1670,7 +1684,8 @@
+@@ -1840,7 +1840,7 @@
  			edma_rxfill_napi_poll, nss_dp_rxfill_napi_budget);
  #else
  		netif_napi_add_weight(netdev, &rxfill_ring->napi,
 -			edma_rxfill_napi_poll, nss_dp_rxfill_napi_budget);
-+			edma_rxfill_napi_poll,
-+			edma_napi_weight(nss_dp_rxfill_napi_budget));
++			edma_rxfill_napi_poll, edma_napi_weight(nss_dp_rxfill_napi_budget));
  #endif
  		rxfill_ring->napi_added = true;
  	}
 --- a/hal/dp_ops/edma_dp/edma_v2/edma_cfg_tx.c
 +++ b/hal/dp_ops/edma_dp/edma_v2/edma_cfg_tx.c
-@@ -902,7 +902,8 @@
+@@ -905,7 +905,7 @@
  				edma_tx_napi_poll, nss_dp_tx_napi_budget);
  #else
  		netif_napi_add_weight(netdev, &txcmpl_ring->napi,
 -				edma_tx_napi_poll, nss_dp_tx_napi_budget);
-+				edma_tx_napi_poll,
-+				edma_napi_weight(nss_dp_tx_napi_budget));
++				edma_tx_napi_poll, edma_napi_weight(nss_dp_tx_napi_budget));
  #endif
- 		txcmpl_ring->napi_added = true;
- 		edma_debug("Napi added for txcmpl ring: %u\n", txcmpl_ring->id);
-@@ -925,7 +926,7 @@
+ 		/*
+ 		 * For VP netdevice specific rings, do not need to wait for an dev open call,
+@@ -943,7 +943,7 @@
  #else
  			netif_napi_add_weight(netdev, &txcmpl_ring->napi,
  					edma_tx_napi_poll,
@@ -87,32 +82,30 @@
  			edma_debug("Napi added for txcmpl ring: %u\n",
 --- a/hal/dp_ops/edma_dp/edma_v2/edma_ppeds.c
 +++ b/hal/dp_ops/edma_dp/edma_v2/edma_ppeds.c
-@@ -970,7 +970,8 @@
- 			edma_ppeds_txcomp_napi_poll, ppeds_handle->eth_txcomp_budget);
+@@ -988,7 +988,7 @@
+ 			edma_ppeds_txcomp_napi_poll, wifi7_hdl->eth_txcomp_budget);
  #else
- 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node->txcmpl_ring.napi,
--			edma_ppeds_txcomp_napi_poll, ppeds_handle->eth_txcomp_budget);
-+			edma_ppeds_txcomp_napi_poll,
-+			edma_napi_weight(ppeds_handle->eth_txcomp_budget));
+ 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node_cfg->txcmpl_ring.napi,
+-			edma_ppeds_txcomp_napi_poll, wifi7_hdl->eth_txcomp_budget);
++			edma_ppeds_txcomp_napi_poll, edma_napi_weight(wifi7_hdl->eth_txcomp_budget));
  #endif
  
  	/*
-@@ -1008,7 +1009,7 @@
+@@ -1026,7 +1026,7 @@
  			edma_ppeds_rx_napi_poll, EDMA_PPEDS_RX_WEIGHT);
  #else
- 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node->rx_ring.napi,
+ 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node_cfg->rx_ring.napi,
 -		edma_ppeds_rx_napi_poll, EDMA_PPEDS_RX_WEIGHT);
 +		edma_ppeds_rx_napi_poll, edma_napi_weight(EDMA_PPEDS_RX_WEIGHT));
  #endif
  
  	/*
-@@ -1033,7 +1034,8 @@
- 			edma_ppeds_rxfill_napi_poll, ppeds_handle->eth_rxfill_budget);
+@@ -1051,7 +1051,7 @@
+ 			edma_ppeds_rxfill_napi_poll, wifi7_hdl->eth_rxfill_budget);
  #else
- 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node->rxfill_ring.napi,
--			edma_ppeds_rxfill_napi_poll, ppeds_handle->eth_rxfill_budget);
-+			edma_ppeds_rxfill_napi_poll,
-+			edma_napi_weight(ppeds_handle->eth_rxfill_budget));
+ 	netif_napi_add_weight(&ppeds_node->napi_ndev, &ppeds_node_cfg->rxfill_ring.napi,
+-			edma_ppeds_rxfill_napi_poll, wifi7_hdl->eth_rxfill_budget);
++			edma_ppeds_rxfill_napi_poll, edma_napi_weight(wifi7_hdl->eth_rxfill_budget));
  #endif
  
- 	ret = edma_ppeds_rx_secondary_alloc(&ppeds_node->rx_ring);
+ 	ret = edma_ppeds_rx_secondary_alloc(&ppeds_node_cfg->rx_ring);

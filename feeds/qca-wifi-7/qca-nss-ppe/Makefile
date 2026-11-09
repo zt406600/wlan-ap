@@ -6,24 +6,17 @@ PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=master
 PKG_RELEASE:=3
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-ppe
-PKG_MIRROR_HASH:=8546d17c60978d56d30f21cd4a21f1d1936be348d0f92119802691688402edc1
-PKG_SOURCE_VERSION:=d53eff24bf257a8bb1b2f68beb3aa06332bfd567
+PKG_MIRROR_HASH:=4600aa70783f9075b80c724c5fa2682a5b98433dd0f08d74917f888dad00d8a3
+PKG_SOURCE_VERSION:=03a79c9564c62db1ad22615a8fb3007de37c41f1
 PKG_VERSION:=1.0
 
-# Make the build dir (and hence the module set) depend on the client package
+# Make the build dir (and hence the module set) depend on the module package
 # selections: OpenWrt encodes PKG_CONFIG_DEPENDS into the .configured stamp, so
-# ticking a new qca-nss-ppe client in menuconfig forces a re-prepare/recompile
+# ticking a new qca-nss-ppe module in menuconfig forces a re-prepare/recompile
 # instead of reusing the previously built module set.
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_kmod-qca-nss-ppe-tun \
 	CONFIG_PACKAGE_kmod-qca-nss-ppe-qdisc \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-pppoe-mgr \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-lag-mgr \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-vxlanmgr \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-mapt \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-tunipip6 \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-gre-mgr \
-	CONFIG_PACKAGE_kmod-qca-nss-ppe-l2tp-mgr \
 	CONFIG_PACKAGE_kmod-qca-nss-ppe-netlink
 
 include $(INCLUDE_DIR)/package.mk
@@ -41,6 +34,7 @@ define KernelPackage/qca-nss-ppe
   TITLE:=Kernel driver for PPE (core driver)
   DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx||TARGET_ipq96xx||TARGET_ipq52xx\
 		+kmod-qca-ssdk-qca-nohnat \
+		+kmod-qca-nss-debug \
 		+kmod-nat46-qca
   FILES:=$(PKG_BUILD_DIR)/drv/ppe_drv/qca-nss-ppe.ko
   AUTOLOAD:=$(call AutoLoad,31,qca-nss-ppe)
@@ -133,59 +127,17 @@ endef
 # kernel ABI through that kernel dependency, symbols are resolved by name at load
 # time (CONFIG_MODVERSIONS is off) and the AUTOLOAD priorities above guarantee
 # that the providing modules are loaded first.
-define KernelPackage/qca-nss-ppe-vlan-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE VLAN manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe \
-	   @PACKAGE_kmod-qca-nss-ppe-vp @PACKAGE_kmod-qca-nss-dp-qca
-  EXTRA_DEPENDS+=, kmod-qca-nss-ppe-vp (>=0), kmod-qca-nss-dp-qca (>=0)
-  FILES:=$(PKG_BUILD_DIR)/clients/vlan/qca-nss-ppe-vlan.ko
-  AUTOLOAD:=$(call AutoLoad,53,qca-nss-ppe-vlan)
-endef
 
-define KernelPackage/qca-nss-ppe-vlan-mgr/Description
-   Kernel module for the PPE VLAN manager.
-   Allocates a PPE interface and a PPE virtual port for every 802.1Q (VLAN)
-   netdev and for the VLAN-as-VP case, so that VLAN traffic can be hardware
-   accelerated by the PPE instead of being punted to the CPU.
-endef
 
 # The VLAN client links against the PPE virtual port API (ppe_vp_alloc()/
 # ppe_vp_free() exported by qca-nss-ppe-vp) and the qca-nss-dp virtual port
 # helpers; see the comment block above for why their module files have to be
 # declared here as well.
-define Package/kmod-qca-nss-ppe-vlan-mgr/extra_provides
-	echo qca-nss-ppe-vp.ko; echo qca-nss-dp.ko
-endef
 
-define KernelPackage/qca-nss-ppe-bridge-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE bridge manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-vlan-mgr \
-	   @PACKAGE_kmod-qca-nss-dp-qca
-  EXTRA_DEPENDS+=, kmod-qca-nss-dp-qca (>=0)
-  FILES:=$(PKG_BUILD_DIR)/clients/bridge/qca-nss-ppe-bridge-mgr.ko
-  AUTOLOAD:=$(call AutoLoad,54,qca-nss-ppe-bridge-mgr)
-endef
-
-define KernelPackage/qca-nss-ppe-bridge-mgr/Description
-   Kernel module for the PPE bridge manager.
-   Registers a PPE bridge interface for every Linux bridge (and joins/leaves
-   its members), so that bridged L2 traffic can be hardware accelerated.
-   Loads after qca-nss-ppe-vlan, whose join/leave helpers it calls.
-endef
 
 # The bridge client needs the qca-nss-dp virtual port helpers, see the comment
 # block above for why the module file has to be declared here as well.
-define Package/kmod-qca-nss-ppe-bridge-mgr/extra_provides
-	echo qca-nss-dp.ko
-endef
+
 
 define KernelPackage/qca-nss-ppe-tun
   SECTION:=kernel
@@ -229,121 +181,6 @@ define KernelPackage/qca-nss-ppe-qdisc/Description
    Kernel module for the PPE queue discipline (shaping/scheduling offload).
 endef
 
-define KernelPackage/qca-nss-ppe-pppoe-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE PPPoE manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-ppp +kmod-pppoe +kmod-bonding
-  FILES:=$(PKG_BUILD_DIR)/clients/pppoe/qca-nss-ppe-pppoe-mgr.ko
-  AUTOLOAD:=$(call AutoLoad,55,qca-nss-ppe-pppoe-mgr)
-endef
-
-define KernelPackage/qca-nss-ppe-pppoe-mgr/Description
-   Kernel module for the PPE PPPoE manager.
-   Creates a PPE interface / virtual port for every PPPoE session so that
-   PPPoE WAN traffic can be accelerated by the PPE instead of being punted
-   to the CPU (needs CONFIG_PPP + CONFIG_PPPOE in the kernel config).
-endef
-
-define KernelPackage/qca-nss-ppe-lag-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE LAG manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-vlan-mgr
-  FILES:=$(PKG_BUILD_DIR)/clients/lag/qca-nss-ppe-lag.ko
-  AUTOLOAD:=$(call AutoLoad,55,qca-nss-ppe-lag)
-endef
-
-define KernelPackage/qca-nss-ppe-lag-mgr/Description
-   Kernel module for the PPE link aggregation (bonding) manager.
-   Accelerates LAG/bonding member traffic. Builds with -DBONDING_SUPPORT
-   when CONFIG_BONDING is enabled in the kernel config.
-endef
-
-define KernelPackage/qca-nss-ppe-vxlanmgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE VXLAN manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-tun +kmod-qca-nss-ppe-bridge-mgr \
-	   +kmod-vxlan
-  FILES:=$(PKG_BUILD_DIR)/clients/vxlanmgr/qca-nss-ppe-vxlanmgr.ko
-  AUTOLOAD:=$(call AutoLoad,56,qca-nss-ppe-vxlanmgr)
-endef
-
-define KernelPackage/qca-nss-ppe-vxlanmgr/Description
-   Kernel module for the PPE VXLAN manager.
-   Offloads VXLAN (and VXLAN-GPE) tunnel decap/encap to the PPE
-   (needs CONFIG_VXLAN in the kernel config).
-endef
-
-define KernelPackage/qca-nss-ppe-mapt
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE MAP-T client
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-tun +kmod-nat46-qca
-  FILES:=$(PKG_BUILD_DIR)/clients/mapt/qca-nss-ppe-mapt.ko
-  AUTOLOAD:=$(call AutoLoad,56,qca-nss-ppe-mapt)
-endef
-
-define KernelPackage/qca-nss-ppe-mapt/Description
-   Kernel module for the PPE MAP-T client (RFC 7599).
-endef
-
-define KernelPackage/qca-nss-ppe-tunipip6
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE TUNIPIP6 manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-tun +kmod-sit +kmod-ip6-tunnel
-  FILES:=$(PKG_BUILD_DIR)/clients/tunipip6/qca-nss-ppe-tunipip6.ko
-  AUTOLOAD:=$(call AutoLoad,56,qca-nss-ppe-tunipip6)
-endef
-
-define KernelPackage/qca-nss-ppe-tunipip6/Description
-   Kernel module for the PPE TUNIPIP6 manager (6rd / DS-Lite style tunnels).
-   Requires CONFIG_IPV6_SIT in the kernel config.
-endef
-
-define KernelPackage/qca-nss-ppe-gre-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE GRE manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-tun +kmod-gre +kmod-gre6
-  FILES:=$(PKG_BUILD_DIR)/clients/gre/qca-nss-ppe-gre.ko
-  AUTOLOAD:=$(call AutoLoad,56,qca-nss-ppe-gre)
-endef
-
-define KernelPackage/qca-nss-ppe-gre-mgr/Description
-   Kernel module for the PPE GRE manager.
-   Requires CONFIG_NET_IPGRE_DEMUX / CONFIG_NET_IPGRE in the kernel config.
-endef
-
-define KernelPackage/qca-nss-ppe-l2tp-mgr
-  SECTION:=kernel
-  CATEGORY:=Kernel modules
-  SUBMENU:=Network Devices
-  TITLE:=Kernel driver for PPE L2TP manager (client)
-  DEPENDS:=@TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx \
-	   +kmod-qca-nss-ppe +kmod-qca-nss-ppe-tun +kmod-ppp +kmod-l2tp +kmod-pppol2tp
-  FILES:=$(PKG_BUILD_DIR)/clients/l2tp/qca-nss-ppe-l2tp.ko
-  AUTOLOAD:=$(call AutoLoad,56,qca-nss-ppe-l2tp)
-endef
-
-define KernelPackage/qca-nss-ppe-l2tp-mgr/Description
-   Kernel module for the PPE L2TP manager.
-   Requires CONFIG_L2TP in the kernel config.
-endef
 
 define KernelPackage/qca-nss-ppe-netlink
   SECTION:=kernel
@@ -391,27 +228,20 @@ endif
 #	drv/exports/ directory.  Reference the build dir directly so a fresh
 #	build does not depend on the headers having been staged by an earlier
 #	install of the qca-nss-ppe-rule package.
-# -I$(LINUX_DIR)/net/l2tp:
-#	clients/l2tp/nss_ppe_l2tp.c includes the kernel private header
-#	<l2tp_core.h>, which a kernel built with CONFIG_L2TP=m keeps in
-#	net/l2tp/ (it is not part of the exported/uapi header set).  The
-#	symbols it uses (l2tp_tunnel_get(), l2tp_tunnel_get_session(),
-#	l2tp_tunnel_dec_refcount(), l2tp_session_dec_refcount(),
-#	l2tp_stats_update()) are all EXPORT_SYMBOL_GPL.
 EXTRA_CFLAGS+= \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk/fal \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk/init \
 	-I$(STAGING_DIR)/usr/include/nat46 \
+	-I$(STAGING_DIR)/usr/include/qca-nss-debug \
+	-I$(PKG_BUILD_DIR)/nss_debug/exports \
 	-I$(PKG_BUILD_DIR)/drv/exports \
 	-I$(LINUX_DIR)/net/l2tp
 
 MAKE_OPTS+=ppe-drv=y
-MAKE_OPTS+=vlan-mgr=y
-MAKE_OPTS+=bridge-mgr=y
 
-# The clients built here reference symbols exported by sibling packages that are
-# built from this very source tree (clients/vlan -> ppe_vp_alloc()/ppe_vp_free()
+# The modules built here reference symbols exported by sibling packages that are
+# built from this very source tree (drv/ppe_vp -> ppe_vp_alloc()/ppe_vp_free()
 # from qca-nss-ppe-vp, netlink/ -> ppe_acl_*/ppe_policer_*/ppe_qos_* from
 # qca-nss-ppe-rule).  Those packages depend back on this package for the headers
 # and symbol versions it installs, so on a clean build_dir their symvers files do
@@ -419,6 +249,11 @@ MAKE_OPTS+=bridge-mgr=y
 # "undefined!" errors (KBUILD_EXTRA_SYMBOLS is only the symvers files that have
 # already been created).  In the QCA SDK all of it is one single module build, so
 # the situation does not exist there.
+#
+# The PPE client managers (bridge/vlan/pppoe/lag/vxlan/mapt/tunipip6/gre/l2tp)
+# are not built here any more: upstream moved them out of the nss-ppe repository
+# into their own (nss-ae-clients), so they live in the qca-nss-ae-clients
+# package.
 #
 # CONFIG_MODVERSIONS is disabled in this kernel, hence the symbol version (CRC)
 # recorded by modpost has no effect at load time: symbols are resolved by name
@@ -447,40 +282,10 @@ ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-qdisc),)
 MAKE_OPTS+=ppe-qdisc=y
 endif
 
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-pppoe-mgr),)
-MAKE_OPTS+=pppoe-mgr=y
-MAKE_OPTS+=PPPOE_MGR_FE_PPE_ENABLE=y
-endif
-
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-lag-mgr),)
-MAKE_OPTS+=lag-mgr=y
-endif
-
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-vxlanmgr),)
-MAKE_OPTS+=vxlanmgr=y
-endif
-
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-mapt),)
-MAKE_OPTS+=mapt-mgr=y
-endif
-
 # tunipip6, gre and l2tp also link against kernel symbols that only exist once
 # the matching kernel feature is enabled (kmod-sit / kmod-ip6-tunnel,
 # kmod-gre / kmod-gre6 and kmod-l2tp / kmod-pppol2tp, all pulled in through
 # DEPENDS), hence they stay off until the package is selected.
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-tunipip6),)
-MAKE_OPTS+=tunipip6-mgr=y
-endif
-
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-gre-mgr),)
-MAKE_OPTS+=gre-mgr=y
-MAKE_OPTS+=GRE_MGR_FE_PPE_ENABLE=y
-endif
-
-ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-l2tp-mgr),)
-MAKE_OPTS+=l2tp-mgr=y
-endif
-
 ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-netlink),)
 MAKE_OPTS+=netlink=y
 endif
@@ -527,15 +332,6 @@ Hooks/Prepare/Post += patch_profile
 Hooks/Prepare/Post += files_profile
 
 $(eval $(call KernelPackage,qca-nss-ppe))
-$(eval $(call KernelPackage,qca-nss-ppe-vlan-mgr))
-$(eval $(call KernelPackage,qca-nss-ppe-bridge-mgr))
 $(eval $(call KernelPackage,qca-nss-ppe-tun))
 $(eval $(call KernelPackage,qca-nss-ppe-qdisc))
-$(eval $(call KernelPackage,qca-nss-ppe-pppoe-mgr))
-$(eval $(call KernelPackage,qca-nss-ppe-lag-mgr))
-$(eval $(call KernelPackage,qca-nss-ppe-vxlanmgr))
-$(eval $(call KernelPackage,qca-nss-ppe-mapt))
-$(eval $(call KernelPackage,qca-nss-ppe-tunipip6))
-$(eval $(call KernelPackage,qca-nss-ppe-gre-mgr))
-$(eval $(call KernelPackage,qca-nss-ppe-l2tp-mgr))
 $(eval $(call KernelPackage,qca-nss-ppe-netlink))

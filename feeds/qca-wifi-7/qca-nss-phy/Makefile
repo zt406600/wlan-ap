@@ -6,8 +6,8 @@ PKG_SOURCE_PROTO:=git
 PKG_BRANCH:=master
 PKG_RELEASE:=1
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/qca-nss-phy
-PKG_MIRROR_HASH:=74d48d057e0422cf69dce25d03cc9263f578c43a3be648e571aef46a72c4653a
-PKG_SOURCE_VERSION:=ad5f76af81697d6d2f0864b8c72a6f38da5079a9
+PKG_MIRROR_HASH:=74ae7d9db5fb37e57e7bb1dc8bac9573f39073148124635cd2a9a132ec9f3fc9
+PKG_SOURCE_VERSION:=d4430efde4841dc2cd6ba2bfa17796e89b133c2e
 PKG_VERSION:=1.0
 
 ifeq ($(DUMP)$(PKG_VERSION),)
@@ -145,6 +145,7 @@ define Build/InstallDev
 	$(CP) -rf $(PKG_BUILD_DIR)/nss_ext/*h $(STAGING_DIR)/usr/include/qca-nss-phy
 	$(CP) -rf $(PKG_BUILD_DIR)/linux_std/clock/*h $(STAGING_DIR)/usr/include/qca-nss-phy
 	$(CP) -rf $(PKG_BUILD_DIR)/linux_std/*h $(STAGING_DIR)/usr/include/qca-nss-phy
+	$(CP) -rf $(PKG_BUILD_DIR)/linux_std/mdio_ahb/*h $(STAGING_DIR)/usr/include/qca-nss-phy
 endef
 
 define KernelPackage/qca-nss-phy/install

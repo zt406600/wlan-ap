@@ -1,0 +1,31 @@
+# ---
+# nss-dp: do not depend on the QCA skb memory profile
+#
+# QSDK 14.0 takes the Rx buffer size from skb_active_profile, which the QSDK
+# kernel fills from the "mem-profile=" command line.  The 6.6.88 kernel used
+# here has the skb recycler but not that runtime profile, so read the size the
+# recycler is configured with (CONFIG_SKB_RECYCLE_SIZE) and fall back to the
+# LP64 value QSDK uses when the recycler is off.
+# ---
+--- a/include/nss_dp_dev.h
++++ b/include/nss_dp_dev.h
+@@ -70,8 +70,18 @@
+ 
+ /*
+  * Rx buffer allocation size as per memory profile
++ *
++ * QSDK 14.0 reads this from skb_active_profile, a kernel addition that picks
++ * the value from the "mem-profile=" command line at boot.  This kernel builds
++ * the skb recycler cache from CONFIG_SKB_RECYCLE_SIZE instead and has no
++ * runtime profile, so use the same value the recycler uses (2304 with this
++ * configuration).  Without the recycler QSDK falls back to 1984 on LP64.
+  */
+-#define NSS_DP_RX_BUFFER_SIZE		(skb_active_profile->value)
++#ifdef CONFIG_SKB_RECYCLE_SIZE
++#define NSS_DP_RX_BUFFER_SIZE		CONFIG_SKB_RECYCLE_SIZE
++#else
++#define NSS_DP_RX_BUFFER_SIZE		1984
++#endif
+ 
+ /*
+  * With Page pool Keep Rx buffer allocation size to (2048-320) = 1728.

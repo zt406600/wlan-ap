@@ -1,0 +1,29 @@
+From: leerep <leerep@163.com>
+Date: Tue, 3 Nov 2026 12:30:00 +0800
+Subject: [PATCH] init: export saved_command_line
+
+The QSDK 14.0 qca-nss-dp driver sizes its EDMA rings from the
+"mem-profile=" boot argument, i.e. from the kernel command line:
+
+	nss_dp_mem_profile_detect() -> __get_mem_profile_flag(saved_command_line)
+
+and it is built as a module, so the symbol has to be exported.  QSDK's 6.6
+tree does exactly this (init/main.c: EXPORT_SYMBOL(saved_command_line)), our
+vanilla 6.6.88 does not.
+
+Without the boot argument the driver falls back to the HIGH profile
+(rx_ring 4096 / tx_ring 2048), which is what the board used before the driver
+bump, so exporting the symbol keeps the behaviour identical.
+
+--- a/init/main.c
++++ b/init/main.c
+@@ -141,6 +141,7 @@ void (*__initdata late_time_init)(void);
+ /* Untouched saved command line (eg. for /proc) */
+ char *saved_command_line __ro_after_init;
+ unsigned int saved_command_line_len __ro_after_init;
++EXPORT_SYMBOL(saved_command_line);
+ /* Command line for parameter parsing */
+ static char *static_command_line;
+ /* Untouched extra command line */
+-- 
+2.43.0
