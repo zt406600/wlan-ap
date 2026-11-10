@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Apply the UCI switch VLAN table as soon as the QCA SSDK driver has brought
+# the switch up, instead of waiting for netifd (S20network).
+#
+# The qca8386 power-on/default VLAN table puts every port into VLAN 1, so
+# between the ssdk probe (S16qca-ssdk, ~11 s uptime) and netifd applying the
+# UCI switch_vlan sections (~15-25 s uptime) WAN broadcasts are flooded between
+# the WAN port and the LAN ports: on every boot LAN clients can pick up a lease
+# from the upstream DHCP server (startup-only leak, gone once netifd is done).
+# Applying the same VLAN table here closes that window; netifd re-applies it
+# later, which is idempotent.
+#
+# Do not set USE_PROCD: rc.common tests it with -n, so any value (even 0)
+# routes start() through the procd registration wrapper.
+
+START=17
+
+apply_vlan() {
+	local sid="$1" dev vid vlan ports
+
+	config_get dev "$sid" device
+	[ "$dev" = "$SWITCH_DEV" ] || return 0
+
+	config_get vlan "$sid" vlan
+	config_get vid "$sid" vid
+	config_get ports "$sid" ports
+
+	[ -n "$ports" ] || return 0
+	vid="${vid:-$vlan}"
+	[ -n "$vid" ] || return 0
+
+	swconfig dev "$dev" vlan "$vid" set vid "$vid" 2>/dev/null
+	swconfig dev "$dev" vlan "$vid" set ports "$ports" 2>/dev/null
+}
+
+apply_switch() {
+	local sid="$1" name enable
+
+	config_get name "$sid" name
+	[ -n "$name" ] || return 0
+	config_get_bool enable "$sid" enable_vlan 0
+	[ "$enable" = "1" ] || return 0
+
+	SWITCH_DEV="$name"
+	swconfig dev "$name" set enable_vlan 1 2>/dev/null
+	config_foreach apply_vlan switch_vlan
+	swconfig dev "$name" set apply 1 2>/dev/null
+	logger -t switch-early "applied the VLAN table of $name before netifd starts"
+}
+
+start() {
+	[ -x /sbin/swconfig ] || return 0
+	. /lib/functions.sh
+
+	# wait (<= 10 s) for the ssdk driver to publish the switch
+	local i=0
+	while [ ! -d /sys/ssdk ] && [ "$i" -lt 100 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	[ -d /sys/ssdk ] || return 0
+
+	config_load network
+	config_foreach apply_switch switch
+}
