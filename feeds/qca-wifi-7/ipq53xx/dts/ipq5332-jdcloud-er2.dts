@@ -422,8 +422,15 @@
 		switch_mac_mode = <0xc>;	/* mac mode for uniphy instance0 */
 		switch_mac_mode1 = <0xff>;	/* mac mode1 for uniphy instance1 */
 		switch_cpu_bmp = <0x1>;		/* Port0 is the CPU port */
-		switch_lan_bmp = <0x1e>;	/* Port1-Port4 are front panel ports */
-		switch_wan_bmp = <0x0>;
+		/*
+		 * Port1 is the WAN port, Port2-Port4 are the LAN ports (netifd splits
+		 * them into VID1/VID2 later).  An empty switch_wan_bmp makes
+		 * ssdk_portvlan_init() put every front panel port into one port-based
+		 * VLAN group at probe time, i.e. until netifd programs the 802.1Q table
+		 * WAN broadcasts (DHCP) are flooded to the LAN ports on every boot.
+		 */
+		switch_lan_bmp = <0x1c>;	/* Port2-Port4 are the LAN ports */
+		switch_wan_bmp = <0x2>;		/* Port1 is the WAN port */
 		link-polling-required = <0>;
 		fdb_sync = "interrupt";
 		link-intr-gpio = <&tlmm 23 GPIO_ACTIVE_HIGH>;
