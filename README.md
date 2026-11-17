@@ -1,356 +1,65 @@
-# OpenWiFi AP NOS
+# JDCloud ER2(re-cs-08) openwrt
 
-OpenWrt-based access point network operating system (AP NOS) for TIP OpenWiFi.
-Read more at [openwifi.tip.build](https://openwifi.tip.build/).
+本仓库基于[Telecominfraproject/wlan-ap](https://github.com/Telecominfraproject/wlan-ap)适配   `JDCloud ER2(re-cs-08) ` 。
 
-> **京东云 ER2 / JDCloud ER2 用户**：本分支（`er2`）已包含该板子的完整板级支持，并附带一份
-> 可直接使用的完整 `.config`（`defconfig/jdc-er2.config`，含 LuCI 网页界面）。
-> 构建方法见下方 [JDCloud ER2 固件构建](#jdcloud-er2-固件构建) 一节。
+## 固件构建
 
-## Building
+### 环境搭建
 
-### Setting up your build machine
-
-Building requires a recent Linux installation. Older systems without Python 3.7
-will have trouble. See this guide for details:
+需要 `linux` 环境，python ≥ 3.7， 或参见openwrt官方的构建环境引导页面:<br>
 https://openwrt.org/docs/guide-developer/toolchain/beginners-build-guide
 
-Install build packages on Debian/Ubuntu (or see above guide for other systems):
+推荐使用 Debian/Ubuntu，在终端执行以下命令构建基础编译环境:
 ```
 sudo apt install build-essential libncurses5-dev gawk git libssl-dev gettext zlib1g-dev swig unzip time rsync python3 python3-setuptools python3-yaml
 ```
 
-### Doing a native build on Linux
+### 本地构建
 
-Use `./build.sh <target>`, or follow the manual steps below:
+使用 `./build.sh <target>`全自动构建, 或按下面步骤手动构建(推荐):
 
-1. Clone and set up the tree. This will create an `openwrt/` directory.
+#### 1. 克隆仓库：
+* main 分支为上游sync fork分支（不要克隆）
+* qca-nss-14.0 为基于qsdk 14.0的适配分支
+*  er2 为紧跟上游的默认适配分支
+*  **按需选择 `qca-nss-14.0` 或 `er2` 分支即可。**
 ```shell
-./setup.py --setup    # for subsequent builds, use --rebase instead
+git clone -b qca-nss-14.0 --single-branch https://github.com/zt406600/wlan-ap.git
+```
+#### 2. 初始化源码树，会自动创建 `openwrt/` 目录。
+```shell
+cd wlan-ap
+./setup.py --setup    # 对于后续构建，请使用 --rebase 替代
 ```
 
-2. Select the profile and base package selection. This setup will install the
-   feeds and packages and generate the `.config` file.
+#### 3. 根据配置文件初始化，将会安装feeds和其他包并生成 `.config` 文件。
+* 你可以根据自己需求精心修改 `profiles/jdcloud_er2.yml` 文件，并一键生成 `.config` 文件。
+* **注意！重复执行会覆盖已存在的.config文件。**
 ```shell
 cd openwrt
-./scripts/gen_config.py linksys_ea8300
+./scripts/gen_config.py jdcloud_er2
 ```
+* **上面命令执行完后，还可以使用 `make menuconfig` 按需求手选需要的包。**
+* **或使用 `cp ../defconfig/jdc-er2.config .config` ，在预置 `.config` 文件基础上增删需要的包。**
 
-3. Build the tree (replace `-j 8` with the number of cores to use).
+#### 4. 执行编译命令，生成固件。
 ```shell
-make -j 8 V=s
-```
-
-### Build output
-
-The build results are located in the `openwrt/bin/` directory:
-
-| Type             | Path                                                 |
-| ---------------- | ---------------------------------------------------- |
-| Firmware images  | `openwrt/bin/targets/<target>/<subtarget>/`          |
-| Kernel modules   | `openwrt/bin/targets/<target>/<subtarget>/packages/` |
-| Package binaries | `openwrt/bin/packages/<platform>/<feed>/`            |
-
-## JDCloud ER2 固件构建
-
-京东云 ER2（DTS compatible `jdcloud,er2`，SoC ipq5332，target `ipq53xx/generic`）的支持、
-QCA NSS/PPE/ECM 硬件加速补丁和默认配置都在本分支里。有两种构建方式，**二选一即可**：
-
-| 方式 | 命令 | 结果 |
-| --- | --- | --- |
-| A. 脚本构建 | `./build.sh jdcloud_er2` | 按 `profiles/jdcloud_er2.yml` 生成 `.config`（base system + 内核/NSS 相关包，约 80 个包），**不含 LuCI 网页界面** |
-| B. 手动构建 | 见下文「手动构建」 | 使用仓库自带的完整配置 `defconfig/jdc-er2.config`（351 个 `CONFIG_PACKAGE_*=y`），含完整 LuCI 网页界面 |
-
-> 两种方式不要混用：`./build.sh` 会用 `gen_config.py` 重新生成 `.config`，把已有配置覆盖掉。
-> 想要自由裁剪软件包，用手动构建（方式 B）。
-
-### 手动构建
-
-构建依赖见上方 [Building](#building) 一节，Debian/Ubuntu 上：
-
-```bash
-sudo apt install build-essential libncurses5-dev gawk git libssl-dev gettext \
-  zlib1g-dev swig unzip time rsync python3 python3-setuptools python3-yaml
-```
-
-```bash
-# 1. 取本分支（er2）
-git clone -b er2 https://github.com/zt406600/wlan-ap.git wlan-ap-er2
-cd wlan-ap-er2
-
-# 2. 拉 OpenWrt 源码（config.yml 里固定到 openwrt-25.12 @ f0a60eee，即 v25.12.5 基线，默认走 gh-proxy 镜像）
-#    + 应用 patches-25.12（ER2 板级支持、NSS/PPE/ECM、fullcone、默认密码…）
-#    + 把本仓库的 profiles/ 链接进 openwrt/
-./setup.py --setup          # 首次；openwrt/ 已存在时改用 ./setup.py --rebase（git fetch +
-                            # reset --hard 到 config.yml 的 revision + 按文件名顺序重打全部补丁）
-
-# 3. 国内网络建议先准备一个"只对本终端生效"的 git 镜像，
-#    否则下一步克隆 github 上的 feed（video）时会很慢（详见下面的注意事项）
-printf '[url "https://gh-proxy.org/https://github.com/"]\n\tinsteadOf = https://github.com/\n' > /tmp/git-mirror
-
-# 4. 准备 feed：gen_config.py 按 profile 生成 feeds.conf（含 qca feed 与 ipq53xx target）、
-#    克隆各 feed、生成索引；再用 install -a 把 feed 里的包挂到 package/feeds，
-#    否则第 5 步里 .config 中的 feed 包会因"找不到包"被静默丢掉
-cd openwrt
-GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/gen_config.py jdcloud_er2
-GIT_CONFIG_GLOBAL=/tmp/git-mirror ./scripts/feeds install -a
-
-# 4b. feed checkout（luci 等）是独立 git 仓库，patches-25.12 是 git am 进 openwrt 树的，
-#     管不到它们；针对 feed 包的补丁放在 feeds-patches/<feed>/ 下，由这一步套用
-#     要在仓库根目录执行（setup.py 从仓库根解析 config.yml 与 feeds-patches/）
-( cd .. && ./setup.py --feed-patches )
-
-# 5. 用仓库自带的完整配置替换上一步生成的最小系统配置，并归一化
-cp ../defconfig/jdc-er2.config .config
-GIT_CONFIG_GLOBAL=/tmp/git-mirror make defconfig
-
-# 6. 下载构建包
-make -j$(nproc) download V=s
-
-# 7. 编译（-j 后接并行任务数）
+make -j$(nproc) download V=s  # 预下载相关源码包
 make -j$(nproc) V=s
 ```
-
-`defconfig/jdc-er2.config` 是一份可直接使用的 `.config`，其中包含（挑重点）：
-
-- **完整 LuCI 网页界面**：`luci`、`luci-ssl`、`luci-mod-admin-full`、`luci-mod-{network,status,system}`、
-  `luci-app-firewall`、`luci-app-package-manager`、`luci-app-upnp`、`luci-app-nss-overview`、
-  `luci-proto-{ppp,ipv6,relay}`、`luci-theme-bootstrap`、简体中文语言包；
-- **QCA 硬件加速**：`kmod-qca-nss-dp-qca`、`kmod-qca-nss-phy`、`kmod-qca-nss-ppe`
-  (+`-bridge-mgr`/`-vlan-mgr`/`-netlink`/`-pppoe-mgr`/`-ds`/`-rule`/`-vp`)、`kmod-qca-nss-sfe`、
-  `kmod-qca-nss-ecm-standard`、`kmod-qca-ssdk-qca-nohnat`、`qca-ssdk-shell`、`kmod-qca8084`、
-  `kmod-qca8k-cc`、`kmod-phylink`、`kmod-phy-aquantia`；
-- **常用工具/子系统**：`curl`、`wget-ssl`、`jq`、`htop`、`tcpdump`、`ethtool-full`、`iperf3`、
-  `smartmontools`、`lm-sensors`、`nvme-cli`、`mmc-utils`、`parted`/`e2fsprogs`/`f2fs` 系列、
-  `wireguard` + `kmod-tcp-bbr`、`kmod-nft-fullcone`（fullcone NAT）等。
-
-### 增删软件包
-
-**编译前加进固件**（推荐）：
-
-```bash
-cd openwrt
-
-# 1) 要加的包如果来自 feed 但还没挂进 package/feeds，先在菜单里看不到/选不上，需要先 install
-./scripts/feeds update -a
-./scripts/feeds install luci-app-ddns          # 换成你要的包名
-
-# 2) 交互式勾选：LuCI 相关在 LuCI 菜单，其它在 Network / Utilities / Kernel modules 等
-make menuconfig
-
-# 3) 归一化配置后重新编译
-make defconfig
-make -j$(nproc) V=s
-```
+#### 5. 生成的固件在 `openwrt/bin/targets/ipq53xx/generic/` 目录下。
 
 
-如果包不在任何 feed 里（例如本仓库不含源码的 `luci-app-mini-diskmanager`、`luci-theme-aurora`），
-把源码 clone 到 `openwrt/package/` 后，菜单里就会出现对应条目：
+## 其他说明
 
-```bash
-cd openwrt/package
-git clone --depth 1 https://github.com/4IceG/luci-app-mini-diskmanager
-git clone --depth 1 https://github.com/eamonxg/luci-theme-aurora
-cd .. && make menuconfig
-```
-
-**编译后给已刷机的设备加包**（不重编整机）：
-
-```bash
-make package/luci-app-ddns/compile     # 只编这一个包，依赖会一起编
-```
-
-产物在 `openwrt/bin/packages/<arch>/<feed>/`（ER2 的 arch 是 `aarch64_cortex-a53`，
-feed 目录为 `base`/`luci`/`packages`/`qca`/`routing`/`telephony`/`video`）。
-本固件用的是 OpenWrt 25.12 的 `apk` 包管理（`CONFIG_USE_APK=y`，安装包后缀是 `*.apk`），
-拷到设备上 `apk add --allow-untrusted xxx.apk` 安装即可；内核模块在
-`openwrt/bin/targets/ipq53xx/generic/packages/`。也可以在 LuCI 的
-`系统 → 软件包`（`luci-app-package-manager`）里直接上传安装。
-
-**保存自己的配置**：调好后存回仓库，下次直接复用：
-
-```bash
-cd openwrt && cp .config ../defconfig/jdc-er2.config
-```
-
-### 产物与刷机
-
-产物在 `openwrt/bin/targets/ipq53xx/generic/`：
-`openwrt-ipq53xx-jdcloud_er2-squashfs-sysupgrade.bin`（刷机用）、`…-squashfs-factory.bin`、
-`…-initramfs-kernel.bin`（救援/救砖用），以及 `config.buildinfo`、`feeds.buildinfo`、
-`…manifest`、`sha256sums`（`feeds.buildinfo` 记录了本次编译实际用到的 feed revision）。
-
-
-### 注意事项
-
-`make defconfig`/`feeds update` 会把所有 feed 的软件包元数据扫一遍（几分钟）。
-feed 里少数包的 Makefile 会在扫描阶段联网（`git ls-remote`、`codeload.github.com` 的 tar 包），
-国内直连可能卡住；`video` feed 本身也在 github 上。两种处理：
-
-```bash
-# a) 有代理：直接让它对所有下载生效（最稳妥，git 和 tar 包都覆盖）
-export http_proxy=http://127.0.0.1:7890 https_proxy=http://127.0.0.1:7890
-
-# b) 只用 git 镜像（即上面第 3 步的 /tmp/git-mirror）：能覆盖 github.com 的 git 操作，
-#    若仍卡住，说明卡在 codeload.github.com 的 tar 包下载，退回用 a) 的代理
-```
-
-本仓库**不包含** 第三方大杂烩 feed（例如 `kenzok8/small-package`）：
-`feeds.conf.default` 与上游 wlan-ap 一致，只有 base/luci/packages/qca/routing/telephony/video。
-需要时自己加（`src-git smpackage https://github.com/kenzok8/small-package`），但请自己 pin commit ——
-它每天自动更新，2026-10 就因为 `luci-app-homeproxy` 把依赖抬到 `sing-box>=1.15.0_alpha10`
-而把当时的构建打挂过。
-
-### 仓库自带的 `extras` feed（vendored 第三方包）
-
-`patches-25.12/0213-feeds-add-extras-feed.patch` 给 `feeds.conf.default` 加了一行
-`src-link extras ../../feeds/extras`，与已有的 `src-link qca ../../feeds/qca-wifi-7`
-同一套路：**包源码就在本仓库里**，`feeds/` 下按普通 feed 的布局摆（`<包名>/Makefile`）。
-
-目前里面只有一个包：
-
-| 包 | 来源 | 说明 |
-|---|---|---|
-| `luci-theme-argon` | [jerrykuku/luci-theme-argon] `v3.1.2`（`7b77b44`） | 主题；配置界面已整合进主题包，不需要 `luci-app-argon-config` |
-
-用它的理由：argon 上游不是 feed 形态的仓库（`Makefile` 在根目录），官方也没有，而第三方
-大杂烩 feed 又不该引进来（见上一节的教训）。vendored 之后版本写死在仓库里，构建不联网、
-不会某天被上游改依赖打挂。
-
-拉取/安装（正常 feed 流程）：
-
-```bash
-cd openwrt
-./scripts/feeds update extras
-./scripts/feeds install luci-theme-argon
-```
-
-升级做法（换版本时把 `feeds/extras/luci-theme-argon/` 整个替换）和丢弃了哪些上游文件
-（`Screenshots/`、`docs/`、`tests/`、`less/`、`compat/`）都写在
-`feeds/extras/luci-theme-argon/PROVENANCE.md` 里。
-
-[jerrykuku/luci-theme-argon]: https://github.com/jerrykuku/luci-theme-argon
-
-`defconfig/jdc-er2.config` 里还有几个包本仓库不含源码（`luci-app-wolultra`、
-`luci-app-mini-diskmanager`、`luci-theme-aurora`），`make defconfig` 会因找不到对应符号
-自动忽略这几行，不影响编译；需要就把源码放进 `openwrt/package/`（见「增删软件包」）。
+### 关于luci-theme-argon主题
+[luci-theme-argon](https://github.com/jerrykuku/luci-theme-argon) `v3.1.2`（`7b77b44`）  被放在了feeds/extras目录，并在使用 `src-link extras ../../feeds/extras` 引用。
 
 ### fullcone（SONiC 全锥形 NAT）
-
-内核侧是本仓库集成的 SONiC fullcone 补丁：`feeds/qca-wifi-7/ipq53xx/patches-6.6/`
-的 `0984`（`nf_nat_core` 的 3-tuple 哈希表，保证源端口映射端点无关）、`0985`
-（`xt_MASQUERADE` 的 `FULLCONE` target，iptables）与 `0986`（`nft_masq` 里的
-`fullcone` 表达式，nftables）；用户侧是 `patches-25.12/0208`–`0212`
-（libnftnl / nftables / iptables / firewall3 / firewall4）以及
-`feeds-patches/luci/` 里的 LuCI 界面补丁（防火墙页面的全局开关、区域开关与协议多选）。
-
-这三个内核补丁（`0984`–`0986`）跟随上游 [openwrt-sonic-fullcone] 修复到 `e5cbaad`：
-`find_appropriate_dst()` 里 `nf_ct_invert_tuple()` 之后没有复位 `result->dst.dir`，
-入站 fullcone 连接（外网主动连映射端口）的回包会被算错 conntrack 指针而不经过 NAT，
-带着内网源地址发出去（上游 issue #6）。同一提交还修正了 `0984`/`0985` 的 hunk header，
-此前 `git apply` 直接报 `corrupt patch`、GNU patch 需要 fuzz 才能打上。
-`0986` 保留本地版本：上游为 6.12+ 改成两参数的 `validate` 并去掉 `.reduce`，
-本 target 是 6.6，仍用三参数签名和 `#ifdef NFT_REDUCE_READONLY` 的兼容写法，
-只补上了末尾 hunk 的上下文（不再需要 fuzz）。
-
-用户侧同样跟到上游 HEAD：`0208` libnftnl 与 `0209` nftables 取 `43cb206`（setter
-按 `_Generic` 在 1.3.2 的 `byteorder` 参数与旧签名之间选择，`<*>` scanner 前缀兼容
-1.1.6/1.1.7），`0212` firewall4 取 `c30deb9`/`454ab55`；`0210` iptables 与 `0211`
-firewall3 上游没再改。这些补丁在本树固定的 libnftnl 1.3.1 / nftables 1.1.6 /
-firewall4 2025-03-17 上重新验过：`git apply --check` 与 `patch --dry-run` 均无 fuzz，
-`bison`/`flex` 通过，`fullcone.c` 用 1.3.1 的头文件 `-fsyntax-only` 无错。
-
-[openwrt-sonic-fullcone]: https://github.com/mufeng05/openwrt-sonic-fullcone
-
-**不要再装 `kmod-nft-fullcone`**（社区实现，仓库默认配置里已关掉，第三方 feed 里才有）：
+本仓库集成了[openwrt-sonic-fullcone](https://github.com/mufeng05/openwrt-sonic-fullcone)补丁，
+**不要再装 `kmod-nft-fullcone`**（默认配置里已关掉）：<br>
 它和 SONiC 的 `fullcone` 表达式同名，同时存在会互相抢占表达式注册，`nft_masq.ko`
-甚至可能加载失败（连带 masquerade 一起坏掉）。
+甚至可能加载失败（连带 masquerade 一起挂掉）。<br>
+fullcone 默认不开（ `menuconfig` 里也不需要额外勾选），刷机后按需在防火墙配置页面打开。
 
-fullcone 默认不开（`menuconfig` 里也不需要额外勾选），按需用 uci 打开：
 
-```bash
-uci set firewall.@defaults[0].fullcone='1'             # 全局总开关
-uci set firewall.@zone[1].fullcone='1'                 # wan 区域，要求该区域已开 masq
-uci add_list firewall.@zone[1].fullcone_proto='udp'    # 可选：只让 udp 走全锥形
-uci commit firewall && /etc/init.d/firewall restart
-nft list ruleset | grep fullcone                       # 应看到 3 条 fullcone 规则
-```
-
-### 内核补丁放在哪里（qca feed 的 ipq53xx）
-
-ipq53xx 是 feed 提供的外部 target，它的内核补丁**只**从
-`feeds/qca-wifi-7/ipq53xx/patches-6.6/` 应用（该 target 的 Makefile 里只有
-`$(call PatchDir,$(LINUX_DIR),$(PATCH_DIR),platform/)` 这一处）。旁边的
-`generic/{backport,pending,hack}-6.6/` 不会被用到：`GENERIC_PLATFORM_DIR`
-在这个 target 下指向不存在的 `target/linux/feeds/linux/generic`，于是回退到
-openwrt 自带的 `target/linux/generic`，而那里只有 6.12 的目录。那几个目录是
-历史遗留，OpenWrt 的通用补丁早已被拍平进 `patches-6.6/`（例如
-`0012-OpenWrt-204-module_strip.patch.patch`），放进去的补丁会**静默失效**。
-
-新补丁放 `patches-6.6/`，编号取未占用的四位数。补丁按文件名排序依次应用，
-所以编号要排在它依赖或冲突的补丁之后（例如改 `net/netfilter/nf_nat_core.c`
-的补丁必须排在 `0441-*` 之后）。改完用
-`make target/linux/prepare V=s` 就能最快确认补丁是否真的应用上了。
-
-### patches-25.12 的编号约定
-
-`01xx` 段留给上游（每次同步 upstream main 都会在末尾追加新的打包升级补丁），
-本仓库自己的补丁一律从 `0200` 起，目前是 `0200`–`0212`。以前 ER2 的补丁占着
-`0124`–`0136`，每同步一次就得给上游的新补丁挪号（见 `a5bbf655`）；现在上游的
-`01xx` 与本仓库逐字节一致，同步时不会再产生编号冲突。新补丁直接取 `02xx` 里
-下一个未占用的号。
-
-### 用方式 A（`./build.sh`）加包
-
-方式 A 的包集合就是 `profiles/jdcloud_er2.yml` 里的 `packages:`，想加包往这里加，例如基础 LuCI：
-
-```yaml
-  # 基础 LuCI（可选）
-  - luci
-  - luci-ssl
-  - luci-mod-admin-full
-  - luci-app-firewall
-  - luci-app-package-manager
-  - luci-proto-ppp
-  - luci-proto-ipv6
-  - luci-theme-bootstrap
-  - luci-i18n-base-zh-cn
-  - luci-i18n-firewall-zh-cn
-```
-
-改完重新跑一次 `./build.sh jdcloud_er2`（它会重新生成 `.config`），再 `make -j$(nproc)` 编译。
-
-## Developer Notes
-
-### Branching model
-
-- `main` - Stable dev branch
-- `next` - Integration branch
-- `staging-*` - Feature/bug branches
-- `release/v#.#.#` - Release branches (*major.minor.patch*)
-
-### Repository structure
-
-Build files:
-- `Makefile` - Calls Docker environment per target
-- `dock-run.sh` - Dockerized build environment
-- `docker/Dockerfile` - Dockerfile for build image
-- `build.sh` - Build script
-- `setup.py` - Clone and set up the tree
-- `config.yml` - Specifies OpenWrt version and patches to apply
-
-Directories:
-- `feeds/` - OpenWiFi feeds
-- `patches/` - OpenWiFi patches applied during builds
-- `profiles/` - Per-target kernel configs, packages, and feeds
-    - [wifi-ax](profiles/wifi-ax.yml): Wi-Fi AX packages
-    - [ucentral-ap](profiles/ucentral-ap.yml): uCentral packages
-    - [x64_vm](profiles/x64_vm.yml): x86-64 VM image
-
-### uCentral packages
-
-AP-NOS packages implementing the uCentral protocol include the following
-repositories (refer to the [ucentral](feeds/ucentral/) feed for a full list):
-- ucentral-client: https://github.com/Telecominfraproject/wlan-ucentral-client
-- ucentral-schema: https://github.com/Telecominfraproject/wlan-ucentral-schema
-- ucentral-wifi: https://github.com/blogic/ucentral-wifi
